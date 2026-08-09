@@ -21,39 +21,36 @@ object AppLauncher {
     fun launch(context: Context, shortcut: AppShortcut): LaunchResult {
         // 1. System screens (Settings, Camera, ...)
         shortcut.systemAction?.let { action ->
-            if (start(context, Intent(action))) {
+            if (startIntent(context, Intent(action))) {
                 return LaunchResult.Opened(shortcut.label)
             }
         }
 
         // 2. Installed app
         shortcut.packageName?.let { pkg ->
-            val launchIntent = runCatching {
-                context.packageManager.getLaunchIntentForPackage(pkg)
-            }.getOrNull()
-            if (launchIntent != null && start(context, launchIntent)) {
+            if (launchPackage(context, pkg)) {
                 return LaunchResult.Opened(shortcut.label)
             }
         }
 
         // 3. Web fallback
         shortcut.webFallbackUrl?.let { url ->
-            if (start(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))) {
+            if (startIntent(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))) {
                 return LaunchResult.Fallback(shortcut.label, "app installed nahi hai, web pe khol diya")
             }
         }
 
         // 4. Play Store page
         shortcut.packageName?.let { pkg ->
-            val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))
-            if (start(context, marketIntent)) {
+            val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))
+            if (startIntent(context, market)) {
                 return LaunchResult.Fallback(shortcut.label, "install nahi hai, Play Store khol diya")
             }
             val storeUrl = Intent(
                 Intent.ACTION_VIEW,
                 Uri.parse("https://play.google.com/store/apps/details?id=$pkg"),
             )
-            if (start(context, storeUrl)) {
+            if (startIntent(context, storeUrl)) {
                 return LaunchResult.Fallback(shortcut.label, "install nahi hai, Play Store khol diya")
             }
         }
@@ -61,7 +58,15 @@ object AppLauncher {
         return LaunchResult.Failed(shortcut.label)
     }
 
-    private fun start(context: Context, intent: Intent): Boolean = try {
+    /** Opens any installed app by its package name. */
+    fun launchPackage(context: Context, packageName: String): Boolean {
+        val intent = runCatching { context.packageManager.getLaunchIntentForPackage(packageName) }
+            .getOrNull() ?: return false
+        return startIntent(context, intent)
+    }
+
+    /** Safe startActivity \u2014 returns false instead of crashing. */
+    fun startIntent(context: Context, intent: Intent): Boolean = try {
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         true
     } catch (e: ActivityNotFoundException) {

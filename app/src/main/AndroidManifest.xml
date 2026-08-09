@@ -1,31 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Android 11+ package visibility: E.V needs to see these apps to launch them -->
+    <!--
+        Android 11+ package visibility.
+        The MAIN/LAUNCHER <intent> block is what lets E.V see and list EVERY
+        launchable app installed on the phone, without needing the
+        QUERY_ALL_PACKAGES permission (which Play Store restricts).
+    -->
     <queries>
-        <package android:name="com.google.android.youtube" />
-        <package android:name="com.whatsapp" />
-        <package android:name="com.instagram.android" />
-        <package android:name="com.google.android.gm" />
-        <package android:name="com.android.chrome" />
-        <package android:name="com.google.android.apps.maps" />
-        <package android:name="org.telegram.messenger" />
-        <package android:name="com.spotify.music" />
-        <package android:name="com.facebook.katana" />
-        <package android:name="com.twitter.android" />
-        <package android:name="in.swiggy.android" />
-        <package android:name="com.application.zomato" />
-        <package android:name="com.phonepe.app" />
-        <package android:name="net.one97.paytm" />
-
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
         <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.youtube.music" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.gaana" />
+        <package android:name="com.jio.media.jiobeats" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.google.android.googlequicksearchbox" />
     </queries>
 
     <application
