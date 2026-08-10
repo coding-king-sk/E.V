@@ -38,6 +38,14 @@ class ContinuousListener(
         const val RESTART_DELAY_MS = 400L
         const val BUSY_RETRY_MS = 1_200L
 
+        /**
+         * Kamre me koi bol hi nahi raha ho to bar bar 400ms me restart karna
+         * battery kha jata hai. Har khali round pe delay itna badhta hai,
+         * [MAX_IDLE_DELAY_MS] tak. Awaz sunte hi wapas 400ms pe aa jata hai.
+         */
+        const val IDLE_BACKOFF_STEP_MS = 400L
+        const val MAX_IDLE_DELAY_MS = 3_000L
+
         /** "Hey", "ok", "suno" — inhe chhod ke aage dekhte hain. */
         val GREETINGS = setOf(
             "hey", "hay", "hai", "hi", "hello", "he", "ok", "okay", "yo", "arey", "are",
@@ -70,6 +78,9 @@ class ContinuousListener(
     private var awaitingCommand = false
     private var awaitingSince = 0L
 
+    /** Lagataar kitni baar kuch sunai nahi diya — backoff ke liye. */
+    private var idleRounds = 0
+
     fun start() {
         if (running) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -78,6 +89,7 @@ class ContinuousListener(
         }
         running = true
         paused = false
+        idleRounds = 0
         listen()
     }
 
@@ -97,6 +109,7 @@ class ContinuousListener(
     fun resume() {
         if (!running) return
         paused = false
+        idleRounds = 0
         restart(RESTART_DELAY_MS)
     }
 
@@ -136,6 +149,14 @@ class ContinuousListener(
         handler.postDelayed({ listen() }, delayMs)
     }
 
+    /** Jitni der se kuch sunai nahi diya, utna sust restart. */
+    private fun idleRestart() {
+        idleRounds++
+        val delay = (RESTART_DELAY_MS + idleRounds * IDLE_BACKOFF_STEP_MS)
+            .coerceAtMost(MAX_IDLE_DELAY_MS)
+        restart(delay)
+    }
+
     private fun release() {
         runCatching {
             recognizer?.cancel()
@@ -147,9 +168,12 @@ class ContinuousListener(
     private fun handleResults(texts: List<String>) {
         val heard = texts.map { it.trim() }.filter { it.isNotEmpty() }
         if (heard.isEmpty()) {
-            restart(RESTART_DELAY_MS)
+            idleRestart()
             return
         }
+
+        // Kuch to sunai diya — backoff reset.
+        idleRounds = 0
 
         val now = System.currentTimeMillis()
 
@@ -241,12 +265,22 @@ class ContinuousListener(
                 restart(BUSY_RETRY_MS)
             }
 
+            // Kuch bola hi nahi gaya — sabse aam case. Yahan sust restart se
+            // battery bachti hai.
+            SpeechRecognizer.ERROR_NO_MATCH,
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
+            -> idleRestart()
+
             else -> restart(RESTART_DELAY_MS)
         }
     }
 
     override fun onReadyForSpeech(params: Bundle?) = Unit
-    override fun onBeginningOfSpeech() = Unit
+    override fun onBeginningOfSpeech() {
+        // Awaz aa rahi hai — backoff hata do, ab tez response chahiye.
+        idleRounds = 0
+    }
+
     override fun onRmsChanged(rmsdB: Float) = Unit
     override fun onBufferReceived(buffer: ByteArray?) = Unit
     override fun onEndOfSpeech() = Unit

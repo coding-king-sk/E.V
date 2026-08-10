@@ -14,6 +14,8 @@ android {
         targetSdk = 35
         versionCode = 9
         versionName = "1.7.1"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -38,6 +40,14 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests {
+            // Parser tests pure Kotlin hain, par koi Android class chhu jaye to
+            // test crash na ho — default value mil jaye.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -53,4 +63,6 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation(libs.junit)
 }
