@@ -16,12 +16,12 @@ sealed interface LlmResult {
 /**
  * Groq ka OpenAI-compatible chat endpoint.
  *
- * Groq isliye chuna kyunki assistant me speed hi sab kuch hai \u2014 2 second ruk
- * gaya to command bolne ka fayda hi nahi. Free tier bhi bina credit card ke
- * milta hai.
+ * Do tarah se use hota hai:
+ *  - command samajhne ke liye (json = true, temperature 0)
+ *  - normal sawaal ka jawab dene ke liye (json = false, thoda garam)
  *
- * Endpoint OpenAI wala hi hai, to kal ko koi doosra provider chahiye ho to
- * sirf BASE_URL aur MODEL badalna padega.
+ * Endpoint OpenAI wala hi hai, to kal ko doosra provider chahiye ho to sirf
+ * ENDPOINT aur MODEL badalna padega.
  */
 object LlmClient {
 
@@ -32,14 +32,19 @@ object LlmClient {
         apiKey: String,
         systemPrompt: String,
         userPrompt: String,
+        json: Boolean = true,
+        temperature: Double = 0.0,
+        maxTokens: Int = 300,
     ): LlmResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext LlmResult.Error("API key nahi hai")
 
         val payload = JSONObject().apply {
             put("model", MODEL)
-            put("temperature", 0)
-            put("max_tokens", 300)
-            put("response_format", JSONObject().put("type", "json_object"))
+            put("temperature", temperature)
+            put("max_tokens", maxTokens)
+            if (json) {
+                put("response_format", JSONObject().put("type", "json_object"))
+            }
             put(
                 "messages",
                 JSONArray()
