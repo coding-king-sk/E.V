@@ -95,6 +95,7 @@ class ContinuousListener(
 
     fun stop() {
         running = false
+        awaitingCommand = false
         handler.removeCallbacksAndMessages(null)
         release()
     }
@@ -111,6 +112,18 @@ class ContinuousListener(
         paused = false
         idleRounds = 0
         restart(RESTART_DELAY_MS)
+    }
+
+    /**
+     * Wake word bahar se aaya hai (offline KWS), yahan se nahi.
+     *
+     * Aisi soorat me naam dobara sunne ki zaroorat nahi — jo bhi agli baat
+     * sunai degi, wahi command maani jayegi.
+     */
+    fun listenForCommand() {
+        awaitingCommand = true
+        awaitingSince = System.currentTimeMillis()
+        if (running) resume() else start()
     }
 
     // ------------------------------------------------------------- internals

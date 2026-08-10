@@ -25,7 +25,10 @@ import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
 import com.ev.android.feature.history.CommandHistory
+import com.ev.android.feature.settings.EvSettings
 import com.ev.android.feature.tts.Speaker
+import com.ev.android.feature.wakeword.SherpaWakeWord
+import com.ev.android.feature.wakeword.WakeWordModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,8 +42,13 @@ import kotlinx.coroutines.launch
  * mic use karne hi nahi deta, aur notification se user ko hamesha pata rehta
  * hai ki mic on hai. Chhupa ke sunne wala kaam E.V nahi karta.
  *
- * Flow: sunna -> "Hey E.V" -> ya to command chalta hai, ya sawaal Groq ko
- * jaata hai -> jawab bol ke sunaya jaata hai -> phir se sunna.
+ * Sunne ke do tareeke hain:
+ *  - **Google recognizer** (default): baar baar session restart karke sunta hai
+ *  - **Offline KWS** (Settings me on karne pe): sherpa-onnx phone ke andar hi
+ *    wake word pakadta hai, audio kahin nahi jata
+ *
+ * Dono ek saath mic nahi le sakte, isliye offline mode me mic barabar haath
+ * badalta hai: KWS sunta hai → wake → mic recognizer ko → command → wapas KWS.
  */
 class EvListeningService : Service() {
 
@@ -52,6 +60,9 @@ class EvListeningService : Service() {
 
         /** TTS callback kisi wajah se na aaye to bhi mic wapas chalu ho jaye. */
         private const val SAFETY_RESUME_MS = 20_000L
+
+        /** Wake ke baad itni der command na aaye to wapas KWS pe chale jao. */
+        private const val COMMAND_WINDOW_MS = 14_000L
 
         @Volatile
         var isRunning: Boolean = false
@@ -71,9 +82,15 @@ class EvListeningService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val safety = Handler(Looper.getMainLooper())
+    private val main = Handler(Looper.getMainLooper())
+    private val wakeTimeout = Handler(Looper.getMainLooper())
 
     private var listener: ContinuousListener? = null
     private var apps: List<InstalledApp> = emptyList()
+
+    private var wakeWord: SherpaWakeWord? = null
+    private var offlineWake = false
+    private var awaitingCommandAfterWake = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -113,7 +130,13 @@ class EvListeningService : Service() {
             },
         )
 
-        listener?.start()
+        // Teeno cheezein honi chahiye: user ne on kiya ho, native library ho,
+        // aur model download ho. Kisi ek ki bhi kami me Google recognizer.
+        offlineWake = EvSettings.offlineWakeWord(this) &&
+            SherpaWakeWord.isLibraryAvailable() &&
+            WakeWordModel.isInstalled(this)
+
+        if (offlineWake) startWakeWord() else listener?.start()
 
         // Chhoti si awaz — isse turant pata chal jata hai ki service zinda hai.
         say("E.V taiyaar hai")
@@ -140,12 +163,75 @@ class EvListeningService : Service() {
     override fun onDestroy() {
         isRunning = false
         safety.removeCallbacksAndMessages(null)
+        main.removeCallbacksAndMessages(null)
+        wakeTimeout.removeCallbacksAndMessages(null)
+
         val hadListener = listener != null
         listener?.stop()
         listener = null
+
+        runCatching { wakeWord?.stop() }
+        wakeWord = null
+
         if (hadListener) Speaker.shutdown()
         scope.cancel()
         super.onDestroy()
+    }
+
+    // ----------------------------------------------------- offline wake word
+
+    private fun startWakeWord() {
+        if (!offlineWake) return
+
+        // Recognizer ko mic chhodna padega — do cheezein ek saath mic nahi
+        // le sakti.
+        listener?.stop()
+
+        val spotter = wakeWord ?: SherpaWakeWord(
+            context = this,
+            onWake = { main.post { onOfflineWake() } },
+            onError = { reason -> main.post { fallbackToRecognizer(reason) } },
+        ).also { wakeWord = it }
+
+        if (!spotter.start()) {
+            fallbackToRecognizer("Offline wake word shuru nahi hua")
+        }
+    }
+
+    private fun onOfflineWake() {
+        if (!offlineWake) return
+
+        // Mic ab recognizer ko chahiye. stop() worker thread ka intezaar karta
+        // hai, par wo ek chunk (100ms) se zyada nahi lagta.
+        runCatching { wakeWord?.stop() }
+
+        awaitingCommandAfterWake = true
+        say("Haan, boliye")
+    }
+
+    /**
+     * Offline KWS kaam nahi kar raha — chupchaap Google recognizer pe wapas.
+     *
+     * User ko error sunane ka koi fayda nahi; use bas ye chahiye ki E.V sunta
+     * rahe. Wajah Settings me dikh hi jayegi.
+     */
+    private fun fallbackToRecognizer(reason: String) {
+        if (!offlineWake) return
+
+        offlineWake = false
+        awaitingCommandAfterWake = false
+        wakeTimeout.removeCallbacksAndMessages(null)
+
+        runCatching { wakeWord?.stop() }
+        wakeWord = null
+
+        listener?.start()
+    }
+
+    private fun backToWakeWord() {
+        wakeTimeout.removeCallbacksAndMessages(null)
+        awaitingCommandAfterWake = false
+        startWakeWord()
     }
 
     // ------------------------------------------------------------- commands
@@ -155,6 +241,8 @@ class EvListeningService : Service() {
      * Har seedhi tabhi chalti hai jab pichli haar jaye.
      */
     private fun runCommand(text: String) {
+        awaitingCommandAfterWake = false
+        wakeTimeout.removeCallbacksAndMessages(null)
         listener?.pause()
 
         scope.launch {
@@ -207,7 +295,23 @@ class EvListeningService : Service() {
 
     private fun resumeListening() {
         safety.removeCallbacksAndMessages(null)
-        listener?.resume()
+
+        if (!offlineWake) {
+            listener?.resume()
+            return
+        }
+
+        if (!awaitingCommandAfterWake) {
+            backToWakeWord()
+            return
+        }
+
+        // Wake ho chuka hai — ab naam dobara bolne ki zaroorat nahi, jo bhi
+        // bolo wahi command hai.
+        listener?.listenForCommand()
+
+        wakeTimeout.removeCallbacksAndMessages(null)
+        wakeTimeout.postDelayed({ backToWakeWord() }, COMMAND_WINDOW_MS)
     }
 
     // -------------------------------------------------------- notification
