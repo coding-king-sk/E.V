@@ -5,7 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import com.ev.android.feature.contacts.ContactsRepository
+import com.ev.android.feature.contacts.PhoneNumbers
 import com.ev.android.feature.launcher.AppLauncher
+import com.ev.android.feature.media.YouTubeResolver
 import java.net.URLEncoder
 
 sealed interface CommandResult {
@@ -17,10 +20,13 @@ sealed interface CommandResult {
 
 object CommandExecutor {
 
-    fun execute(context: Context, command: EvCommand): CommandResult = when (command) {
+    private const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+
+    suspend fun execute(context: Context, command: EvCommand): CommandResult = when (command) {
         is EvCommand.OpenApp -> openApp(context, command.target)
         is EvCommand.PlayMedia -> playMedia(context, command.query, command.target)
         is EvCommand.SearchInApp -> searchInApp(context, command.query, command.target)
+        is EvCommand.SendWhatsApp -> sendWhatsApp(context, command.contactName, command.message)
         is EvCommand.Unknown -> CommandResult.Failure(
             "Samajh nahi aaya: \"${command.raw}\". Try: \"YouTube pe paisa song lagao\""
         )
@@ -29,12 +35,8 @@ object CommandExecutor {
     private fun openApp(context: Context, target: AppTarget): CommandResult {
         val pkg = target.packageName
 
-        if (pkg != null) {
-            val launchIntent = runCatching { context.packageManager.getLaunchIntentForPackage(pkg) }
-                .getOrNull()
-            if (launchIntent != null && AppLauncher.startIntent(context, launchIntent)) {
-                return CommandResult.Success("${target.label} khul raha hai")
-            }
+        if (pkg != null && AppLauncher.launchPackage(context, pkg)) {
+            return CommandResult.Success("${target.label} khul raha hai")
         }
 
         target.webFallbackUrl?.let { url ->
@@ -51,57 +53,114 @@ object CommandExecutor {
     }
 
     /**
-     * Search + autoplay.
+     * Search + actually play.
      *
-     * MEDIA_PLAY_FROM_SEARCH is the same intent Google Assistant uses. YouTube,
-     * YouTube Music, Spotify, Gaana etc. all handle it and start playing the
-     * best match straight away \u2014 no extra tap needed.
+     * Step 1 is the important one: MEDIA_PLAY_FROM_SEARCH usually just lands on
+     * YouTube's search screen instead of playing, so we resolve the top result's
+     * video id ourselves and open a /watch deep link, which always autoplays.
      */
-    private fun playMedia(context: Context, query: String, target: AppTarget): CommandResult {
+    private suspend fun playMedia(
+        context: Context,
+        query: String,
+        target: AppTarget,
+    ): CommandResult {
         val pkg = target.packageName
 
-        // 1. Ask the target app to play it directly.
+        // 1. YouTube: resolve the first result and open it directly.
+        if (pkg == null || pkg == YOUTUBE_PACKAGE) {
+            val videoId = YouTubeResolver.firstVideoId(query)
+            if (videoId != null && openYouTubeVideo(context, videoId)) {
+                return CommandResult.Success("YouTube pe \"$query\" chal raha hai")
+            }
+        }
+
+        // 2. Ask the target app to play it (works well for Spotify / YT Music).
         if (pkg != null && startPlayFromSearch(context, query, pkg)) {
             return CommandResult.Success("${target.label} pe \"$query\" play ho raha hai")
         }
 
-        // 2. In-app search (YouTube opens results and autoplays the top video
-        //    when it comes from a search intent).
-        if (pkg != null) {
-            val searchIntent = Intent(Intent.ACTION_SEARCH).apply {
-                setPackage(pkg)
-                putExtra(SearchManager.QUERY, query)
-                putExtra("query", query)
-            }
-            if (AppLauncher.startIntent(context, searchIntent)) {
-                return CommandResult.Success("${target.label} pe \"$query\" search kiya")
-            }
+        // 3. In-app search screen.
+        if (pkg != null && startInAppSearch(context, query, pkg)) {
+            return CommandResult.Success("${target.label} pe \"$query\" search kiya")
         }
 
-        // 3. Let any music/video app on the phone handle it.
+        // 4. Any music/video app on the phone.
         if (startPlayFromSearch(context, query, packageName = null)) {
             return CommandResult.Success("\"$query\" play ho raha hai")
         }
 
-        // 4. YouTube results page \u2014 inside the app if possible, else browser.
+        // 5. Results page \u2014 in the app if possible, else browser.
         return openYouTubeResults(context, query, preferPackage = pkg)
     }
 
     private fun searchInApp(context: Context, query: String, target: AppTarget): CommandResult {
         val pkg = target.packageName
+        if (pkg != null && startInAppSearch(context, query, pkg)) {
+            return CommandResult.Success("${target.label} pe \"$query\" search kiya")
+        }
+        return openYouTubeResults(context, query, preferPackage = pkg)
+    }
 
-        if (pkg != null) {
-            val searchIntent = Intent(Intent.ACTION_SEARCH).apply {
-                setPackage(pkg)
-                putExtra(SearchManager.QUERY, query)
-                putExtra("query", query)
-            }
-            if (AppLauncher.startIntent(context, searchIntent)) {
-                return CommandResult.Success("${target.label} pe \"$query\" search kiya")
+    /**
+     * WhatsApp cannot be made to press "send" from an intent \u2014 that is blocked
+     * for security. So E.V opens the right chat with the message already typed,
+     * and you just tap the send arrow.
+     */
+    private suspend fun sendWhatsApp(
+        context: Context,
+        contactName: String?,
+        message: String,
+    ): CommandResult {
+        if (contactName.isNullOrBlank()) {
+            return openApp(context, CommandParser.whatsapp)
+        }
+
+        val number = when {
+            PhoneNumbers.looksLikeNumber(contactName) -> PhoneNumbers.normalize(contactName)
+            else -> ContactsRepository.findByName(context, contactName)?.phone
+        }
+
+        if (number == null) {
+            return if (!ContactsRepository.hasPermission(context)) {
+                CommandResult.Failure("Contacts ki permission chahiye naam se message bhejne ke liye")
+            } else {
+                CommandResult.Failure("\"$contactName\" naam ka contact nahi mila")
             }
         }
 
-        return openYouTubeResults(context, query, preferPackage = pkg)
+        val encoded = URLEncoder.encode(message, "UTF-8").replace("+", "%20")
+
+        val deepLink = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("whatsapp://send?phone=$number&text=$encoded"),
+        ).setPackage("com.whatsapp")
+        if (AppLauncher.startIntent(context, deepLink)) {
+            return CommandResult.Success("$contactName ka chat khul gaya \u2014 send dabao")
+        }
+
+        val waMe = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$number?text=$encoded"))
+        if (AppLauncher.startIntent(context, waMe)) {
+            return CommandResult.Success("$contactName ka chat khul gaya \u2014 send dabao")
+        }
+
+        return CommandResult.Failure("WhatsApp open nahi ho paya")
+    }
+
+    private fun openYouTubeVideo(context: Context, videoId: String): Boolean {
+        val inApp = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.youtube.com/watch?v=$videoId"),
+        ).setPackage(YOUTUBE_PACKAGE)
+        if (AppLauncher.startIntent(context, inApp)) return true
+
+        val scheme = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId"))
+        if (AppLauncher.startIntent(context, scheme)) return true
+
+        val browser = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.youtube.com/watch?v=$videoId"),
+        )
+        return AppLauncher.startIntent(context, browser)
     }
 
     private fun startPlayFromSearch(context: Context, query: String, packageName: String?): Boolean {
@@ -109,6 +168,15 @@ object CommandExecutor {
             putExtra(SearchManager.QUERY, query)
             putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
             if (packageName != null) setPackage(packageName)
+        }
+        return AppLauncher.startIntent(context, intent)
+    }
+
+    private fun startInAppSearch(context: Context, query: String, packageName: String): Boolean {
+        val intent = Intent(Intent.ACTION_SEARCH).apply {
+            setPackage(packageName)
+            putExtra(SearchManager.QUERY, query)
+            putExtra("query", query)
         }
         return AppLauncher.startIntent(context, intent)
     }

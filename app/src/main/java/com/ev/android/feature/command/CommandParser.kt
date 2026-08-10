@@ -9,15 +9,16 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  * Turns Hinglish speech/text into an [EvCommand].
  *
  * Examples:
- *  "youtube pe paisa song lagao"   -> PlayMedia("paisa song", YouTube)
- *  "paisa wala gaana baja do"      -> PlayMedia("paisa wala gaana", YouTube)
- *  "spotify pe tum hi ho lagao"    -> PlayMedia("tum hi ho", Spotify)
- *  "whatsapp kholo"                -> OpenApp(WhatsApp)
- *  "phonepe open karo"             -> OpenApp(PhonePe)
+ *  "youtube pe paisa song lagao"          -> PlayMedia("paisa song", YouTube)
+ *  "paisa wala gaana baja do"             -> PlayMedia("paisa wala gaana", YouTube)
+ *  "spotify pe tum hi ho lagao"           -> PlayMedia("tum hi ho", Spotify)
+ *  "whatsapp kholo"                       -> OpenApp(WhatsApp)
+ *  "rehan ko bolo ki main aa raha hoon"   -> SendWhatsApp("rehan", "main aa raha hoon")
  */
 object CommandParser {
 
     val youtube = AppTarget("YouTube", "com.google.android.youtube", "https://www.youtube.com")
+    val whatsapp = AppTarget("WhatsApp", "com.whatsapp", "https://web.whatsapp.com")
 
     private val playVerbs = listOf(
         "laga do", "lagaa do", "lagado", "laga de", "lagade", "lagao", "lagaao", "laga",
@@ -38,21 +39,44 @@ object CommandParser {
         "dhoond do", "dhoondo", "dhundo", "khojo", "find",
     )
 
+    private val messageVerbs = listOf(
+        "message bhej do", "message bhejo", "message bhejna", "message karo", "message kar",
+        "msg bhej do", "msg bhejo", "msg karo",
+        "text kar do", "text karo",
+        "bhej do", "bhejo", "bhejna", "bhej",
+        "likh do", "likho", "likh",
+        "keh do", "kehna", "kaho",
+        "bol do", "bolo", "bol",
+    )
+
     /** Only stripped from the START/END of a query so song names stay intact. */
     private val fillerWords = setOf(
         "mujhe", "muje", "please", "plz", "zara", "bhai", "abhi", "to", "na", "yaar",
     )
 
-    private val connectors = setOf("pe", "par", "pr", "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke")
+    private val connectors =
+        setOf("pe", "par", "pr", "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke")
+
+    private val messageNoiseWords = setOf("message", "msg", "text", "whatsapp", "wa")
 
     private val targetSplitRegex =
         Regex("^(.{2,40}?)\\s+(pe|par|pr|me|mein|main|on|in)\\s+(.+)$")
+
+    private val whatsappPrefixRegex =
+        Regex("^(whatsapp|whats app|wa)\\s+(pe|par|pr|me|mein|main|on)\\s+")
 
     fun parse(rawInput: String, installedApps: List<InstalledApp>): EvCommand {
         val raw = rawInput.trim()
         if (raw.isEmpty()) return EvCommand.Unknown(raw)
 
-        var text = normalize(raw)
+        val normalized = normalize(raw)
+
+        // WhatsApp messaging is checked first \u2014 it has a very distinctive
+        // "<naam> ko ... <bhejo/bolo>" shape that the app-launch parser would
+        // otherwise mangle.
+        parseWhatsAppMessage(normalized)?.let { return it }
+
+        var text = normalized
         var target: AppTarget? = null
 
         // "<app> pe <rest>" -> pull the app out of the front of the sentence.
@@ -90,6 +114,70 @@ object CommandParser {
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
         }
+    }
+
+    /**
+     * Handles both Hinglish word orders:
+     *   "rehan ko whatsapp pe bolo ki main aa raha hoon"  (body AFTER the verb)
+     *   "whatsapp pe rehan ko good morning bhej do"       (body BEFORE the verb)
+     */
+    private fun parseWhatsAppMessage(text: String): EvCommand? {
+        val mentionsWhatsApp = text.contains("whatsapp") || text.contains("whats app")
+        val stripped = text.replace(whatsappPrefixRegex, "").trim()
+
+        val koMatch = Regex("\\s+ko\\s+").find(stripped) ?: run {
+            // "whatsapp kholo" and friends are NOT messages.
+            return null
+        }
+
+        val namePart = cleanName(stripped.substring(0, koMatch.range.first))
+        var rest = stripped.substring(koMatch.range.last + 1).trim()
+        rest = rest.replace(whatsappPrefixRegex, "").trim()
+
+        val verb = matchPhrase(rest, messageVerbs)
+
+        // Without an explicit whatsapp mention we need a messaging verb,
+        // otherwise "usko lagao" would be misread as a message.
+        if (verb == null && !mentionsWhatsApp) return null
+        if (namePart.isEmpty()) return null
+
+        val body = if (verb == null) {
+            stripNoise(rest)
+        } else {
+            val regex = phraseRegex(verb)
+            val match = regex.find(rest)
+            if (match == null) {
+                stripNoise(rest)
+            } else {
+                val before = rest.substring(0, match.range.first).trim()
+                val after = rest.substring(match.range.last + 1)
+                    .trim()
+                    .removePrefix("ki ")
+                    .removePrefix("that ")
+                    .trim()
+                stripNoise(if (after.isNotEmpty()) after else before)
+            }
+        }
+
+        if (body.isEmpty()) return null
+        return EvCommand.SendWhatsApp(contactName = namePart, message = body)
+    }
+
+    private fun cleanName(input: String): String {
+        val tokens = normalize(input).split(" ")
+            .filter { it.isNotBlank() && it !in messageNoiseWords && it !in connectors && it !in fillerWords }
+        return tokens.joinToString(" ")
+    }
+
+    private fun stripNoise(input: String): String {
+        val tokens = normalize(input).split(" ").filter { it.isNotBlank() }.toMutableList()
+        while (tokens.isNotEmpty() && (tokens.first() in messageNoiseWords || tokens.first() in fillerWords)) {
+            tokens.removeAt(0)
+        }
+        while (tokens.isNotEmpty() && (tokens.last() in messageNoiseWords || tokens.last() in fillerWords)) {
+            tokens.removeAt(tokens.lastIndex)
+        }
+        return tokens.joinToString(" ")
     }
 
     /**

@@ -5,6 +5,9 @@
 
 package com.ev.android.feature.launcher
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -51,6 +55,8 @@ import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
+import com.ev.android.feature.command.EvCommand
+import com.ev.android.feature.contacts.ContactsRepository
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import kotlinx.coroutines.launch
@@ -65,6 +71,8 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var input by remember { mutableStateOf("") }
     var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var loadingApps by remember { mutableStateOf(true) }
+    var busy by remember { mutableStateOf(false) }
+    var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
 
     LaunchedEffect(Unit) {
         installedApps = InstalledAppsRepository.load(context)
@@ -75,11 +83,44 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         scope.launch { snackbarHostState.showSnackbar(message) }
     }
 
+    fun dispatch(command: EvCommand) {
+        scope.launch {
+            busy = true
+            val result = CommandExecutor.execute(context, command)
+            busy = false
+            snackbarHostState.showSnackbar(result.message)
+        }
+    }
+
+    val contactsPermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val queued = pendingCommand
+        pendingCommand = null
+        when {
+            queued == null -> Unit
+            granted -> dispatch(queued)
+            else -> notify("Contacts permission ke bina naam se message nahi bhej sakta")
+        }
+    }
+
     fun runCommand(text: String) {
         if (text.isBlank()) return
         keyboard?.hide()
+
         val command = CommandParser.parse(text, installedApps)
-        notify(CommandExecutor.execute(context, command).message)
+
+        val needsContacts = command is EvCommand.SendWhatsApp &&
+            !command.contactName.isNullOrBlank() &&
+            !ContactsRepository.hasPermission(context)
+
+        if (needsContacts) {
+            pendingCommand = command
+            contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+            return
+        }
+
+        dispatch(command)
     }
 
     val startVoice = rememberVoiceCommand(
@@ -123,13 +164,21 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                         }
                         IconButton(
                             onClick = { runCommand(input) },
-                            enabled = input.isNotBlank(),
+                            enabled = input.isNotBlank() && !busy,
                         ) {
                             Text("\u25B6", style = MaterialTheme.typography.titleLarge)
                         }
                     }
                 },
             )
+
+            if (busy) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+            }
 
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 104.dp),
