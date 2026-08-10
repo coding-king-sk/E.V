@@ -56,6 +56,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.ev.android.feature.accessibility.AccessibilityHelper
+import com.ev.android.feature.ai.AiCommandResolver
+import com.ev.android.feature.ai.AiOutcome
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
@@ -63,6 +65,7 @@ import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
 import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
@@ -110,6 +113,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
     var accessibilityOn by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         accessibilityOn = AccessibilityHelper.isEnabled(context)
@@ -173,20 +177,49 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         if (queued != null) dispatch(queued)
     }
 
-    fun runCommand(text: String) {
-        if (text.isBlank()) return
-        keyboard?.hide()
-
-        val command = CommandParser.parse(text, installedApps)
+    /** Permission maango (agar chahiye) phir command chalao. */
+    fun handle(command: EvCommand) {
         val missing = missingPermissions(command)
-
         if (missing.isNotEmpty()) {
             pendingCommand = command
             permissionLauncher.launch(missing.toTypedArray())
             return
         }
-
         dispatch(command)
+    }
+
+    /**
+     * Pehle offline parser, aur wo haar jaye tabhi AI.
+     *
+     * Isse roz ke commands turant aur free me chalte hain, aur network sirf
+     * ghumavdar sentences ke liye use hota hai.
+     */
+    fun runCommand(text: String) {
+        if (text.isBlank()) return
+        keyboard?.hide()
+
+        val command = CommandParser.parse(text, installedApps)
+        if (command !is EvCommand.Unknown) {
+            handle(command)
+            return
+        }
+
+        scope.launch {
+            busy = true
+            val outcome = AiCommandResolver.resolve(context, text, installedApps)
+            busy = false
+
+            when (outcome) {
+                is AiOutcome.Resolved -> handle(outcome.command)
+
+                is AiOutcome.Failed -> {
+                    if (speakReplies) Speaker.speak(outcome.reason)
+                    snackbarHostState.showSnackbar(outcome.reason)
+                }
+
+                AiOutcome.Unavailable -> handle(command)
+            }
+        }
     }
 
     val startVoice = rememberVoiceCommand(
@@ -231,6 +264,10 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                             text = if (speakReplies) "\uD83D\uDD0A" else "\uD83D\uDD07",
                             style = MaterialTheme.typography.titleLarge,
                         )
+                    }
+
+                    IconButton(onClick = { showSettings = true }) {
+                        Text("\u2699", style = MaterialTheme.typography.titleLarge)
                     }
                 },
             )
@@ -389,6 +426,13 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            onDismiss = { showSettings = false },
+            onSaved = { notify(it) },
+        )
     }
 }
 
