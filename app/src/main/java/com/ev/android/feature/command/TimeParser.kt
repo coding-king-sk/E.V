@@ -1,5 +1,8 @@
 package com.ev.android.feature.command
 
+import java.util.Calendar
+import java.util.TimeZone
+
 /**
  * Hinglish me time nikalne wale chhote helpers.
  *
@@ -84,6 +87,58 @@ internal object TimeParser {
 
         return hour to minute
     }
+
+    /**
+     * Reminder ka exact waqt (epoch millis).
+     *
+     * Do tarah se bolte hain log:
+     *  - "10 minute baad yaad dilana"        -> abhi se itni der baad
+     *  - "kal subah 8 baje yaad dilana"      -> agle din 08:00
+     *
+     * Agar sirf time bola ho ("shaam 7 baje") aur wo waqt aaj nikal chuka ho,
+     * to agle din maan lete hain — warna reminder turant bajta, jo bekaar hai.
+     *
+     * @param now testing ke liye inject kiya ja sakta hai
+     */
+    fun reminderMillis(
+        text: String,
+        now: Long = System.currentTimeMillis(),
+        zone: TimeZone = TimeZone.getDefault(),
+    ): Long? {
+        relativeDelaySeconds(text)?.let { return now + it * 1000L }
+
+        val time = clockTime(text) ?: return null
+
+        val calendar = Calendar.getInstance(zone).apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, time.first)
+            set(Calendar.MINUTE, time.second)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val dayOffset = when {
+            containsWord(text, "parso") -> 2
+            containsWord(text, "kal") -> 1
+            else -> 0
+        }
+        if (dayOffset > 0) calendar.add(Calendar.DAY_OF_YEAR, dayOffset)
+
+        if (calendar.timeInMillis <= now) calendar.add(Calendar.DAY_OF_YEAR, 1)
+
+        return calendar.timeInMillis
+    }
+
+    /** "10 minute baad", "do ghante baad" -> seconds. */
+    private fun relativeDelaySeconds(text: String): Int? {
+        val later = containsWord(text, "baad") || containsWord(text, "bad") ||
+            containsWord(text, "later")
+        if (!later) return null
+        return durationSeconds(text)
+    }
+
+    private fun containsWord(text: String, word: String): Boolean =
+        Regex("(^|\\s)" + Regex.escape(word) + "($|\\s)").containsMatchIn(text)
 
     private fun valueOf(token: String): Int? =
         token.toIntOrNull() ?: numberWords[token]

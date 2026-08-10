@@ -41,6 +41,17 @@ sealed interface EvCommand {
     /** "subah 7 baje alarm lagao" */
     data class Alarm(val hour: Int, val minute: Int) : EvCommand
 
+    /**
+     * "kal subah 8 baje yaad dilana ki dawai leni hai"
+     *
+     * Alarm se alag hai: alarm phone ki Clock app me jata hai aur sirf bajta
+     * hai, jabki reminder E.V khud yaad rakhta hai aur waqt aane par bol ke
+     * batata hai ki kya karna tha.
+     *
+     * @param at epoch millis — kab bajana hai
+     */
+    data class Reminder(val at: Long, val text: String) : EvCommand
+
     /** "torch on karo", "volume badhao", "screenshot lo" */
     data class Device(val action: DeviceAction) : EvCommand
 
