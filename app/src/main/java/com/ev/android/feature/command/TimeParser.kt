@@ -8,6 +8,9 @@ package com.ev.android.feature.command
  */
 internal object TimeParser {
 
+    /** Timer ki upper limit — 24 ghante se zyada ka timer galti hi hoti hai. */
+    private const val MAX_DURATION_SECONDS = 24 * 3600
+
     private val numberWords = mapOf(
         "ek" to 1, "do" to 2, "teen" to 3, "char" to 4, "chaar" to 4,
         "paanch" to 5, "panch" to 5, "cheh" to 6, "chhe" to 6, "saat" to 7,
@@ -34,11 +37,17 @@ internal object TimeParser {
             }
 
             // Unit se pehle wala token hi number hota hai: "5 minute".
-            val amount = tokens.getOrNull(index - 1)?.let { valueOf(it) }
-                ?: tokens.firstNotNullOfOrNull { valueOf(it) }
-                ?: continue
+            //
+            // Pehle yahan "kahin se bhi koi number utha lo" wala fallback tha,
+            // jisse "7 baje wala 5 minute timer" me galat number chun jata tha.
+            // Number na mile to is unit ko chhod ke aage dekh lete hain.
+            val amount = tokens.getOrNull(index - 1)?.let { valueOf(it) } ?: continue
 
-            if (amount > 0) return amount * multiplier
+            if (amount > 0) {
+                return (amount.toLong() * multiplier)
+                    .coerceAtMost(MAX_DURATION_SECONDS.toLong())
+                    .toInt()
+            }
         }
 
         return null
@@ -64,12 +73,14 @@ internal object TimeParser {
         if (hour !in 0..23 || minute !in 0..59) return null
 
         val morning = text.contains("subah") || text.contains("am") || text.contains("morning")
-        val evening = text.contains("raat") || text.contains("shaam") || text.contains("sham") ||
-            text.contains("pm") || text.contains("dopahar") || text.contains("evening") ||
-            text.contains("night")
+        val night = text.contains("raat") || text.contains("night")
+        val evening = night || text.contains("shaam") || text.contains("sham") ||
+            text.contains("pm") || text.contains("dopahar") || text.contains("evening")
 
         if (evening && hour in 1..11) hour += 12
         if (morning && hour == 12) hour = 0
+        // "raat 12 baje" ka matlab aadhi raat hai, dopahar ke 12 nahi.
+        if (night && hour == 12) hour = 0
 
         return hour to minute
     }

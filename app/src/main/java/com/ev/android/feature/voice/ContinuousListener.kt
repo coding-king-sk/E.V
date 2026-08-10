@@ -18,7 +18,7 @@ import android.speech.SpeechRecognizer
  *
  * **Wake word ka matching sabse nazuk hissa hai.** Pehle version me exact
  * string match tha aur wo fail ho raha tha, kyunki:
- *  - Hindi engine "Hey E.V" ko Devanagari me likh deta hai ("\u0939\u0947 \u0908\u0935\u0940")
+ *  - Hindi engine "Hey E.V" ko Devanagari me likh deta hai ("हे ईवी")
  *  - kabhi "hey ivy", "hey evie", "a v", "hey we" jaisa kuch sunta hai
  *
  * Isliye ab exact match ki jagah **token-based** matching hai: pehla shabd
@@ -38,21 +38,28 @@ class ContinuousListener(
         const val RESTART_DELAY_MS = 400L
         const val BUSY_RETRY_MS = 1_200L
 
-        /** "Hey", "ok", "suno" \u2014 inhe chhod ke aage dekhte hain. */
+        /** "Hey", "ok", "suno" — inhe chhod ke aage dekhte hain. */
         val GREETINGS = setOf(
             "hey", "hay", "hai", "hi", "hello", "he", "ok", "okay", "yo", "arey", "are",
             "suno", "sun",
-            "\u0939\u0947", "\u0939\u0947\u092f", "\u0939\u093e\u092f", "\u0939\u0948\u0932\u094b", "\u0913\u0915\u0947", "\u0905\u0930\u0947", "\u0938\u0941\u0928\u094b",
+            "हे", "हेय", "हाय", "हैलो", "ओके", "अरे", "सुनो",
         )
 
         /** "E.V" ko engine jitne tarah se sun sakta hai. */
         val NAMES = setOf(
             "ev", "e", "evi", "evie", "evy", "eevee", "eve", "ivy", "ivi", "avi", "a",
-            "\u0908\u0935\u0940", "\u0908\u0935", "\u0908", "\u0907\u0935\u0940", "\u0907\u0935", "\u090f\u0935", "\u090f\u0935\u0940", "\u0906\u0908\u0935\u0940",
+            "ईवी", "ईव", "ई", "इवी", "इव", "एव", "एवी", "आईवी",
         )
 
+        /**
+         * Ye naam itne chhote hain ki roz ki baat me bhi aa jate hain ("a",
+         * "e", "ई"). Inhe akela wake word maan lene se TV ki awaz tak E.V ko
+         * jaga deti thi, isliye inke saath "v" wala doosra hissa zaroori hai.
+         */
+        val AMBIGUOUS_NAMES = setOf("e", "a", "ई")
+
         /** "e v" alag alag suna gaya ho to doosra token ye hoga. */
-        val NAME_TAILS = setOf("v", "vee", "vi", "bee", "b", "\u0935\u0940", "\u0935")
+        val NAME_TAILS = setOf("v", "vee", "vi", "bee", "b", "वी", "व")
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -80,7 +87,7 @@ class ContinuousListener(
         release()
     }
 
-    /** Jab tak E.V khud bol raha hai, mic band \u2014 warna khud ko sun leta hai. */
+    /** Jab tak E.V khud bol raha hai, mic band — warna khud ko sun leta hai. */
     fun pause() {
         paused = true
         handler.removeCallbacksAndMessages(null)
@@ -110,7 +117,7 @@ class ContinuousListener(
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
             )
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-            // Hinglish ke liye dono \u2014 engine jo behtar samjhe.
+            // Hinglish ke liye dono — engine jo behtar samjhe.
             putExtra(
                 RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES,
                 arrayListOf("hi-IN", "en-IN"),
@@ -146,7 +153,7 @@ class ContinuousListener(
 
         val now = System.currentTimeMillis()
 
-        // Wake word pehle ho chuka hai \u2014 ab jo bhi bola, wahi command hai.
+        // Wake word pehle ho chuka hai — ab jo bhi bola, wahi command hai.
         if (awaitingCommand && now - awaitingSince < COMMAND_WINDOW_MS) {
             awaitingCommand = false
             onCommand(heard.first())
@@ -159,10 +166,10 @@ class ContinuousListener(
             val rest = afterWakeWord(text) ?: continue
 
             if (rest.isNotBlank()) {
-                // "Hey E.V, torch on karo" \u2014 sab ek hi saans me.
+                // "Hey E.V, torch on karo" — sab ek hi saans me.
                 onCommand(rest)
             } else {
-                // Sirf "Hey E.V" \u2014 ab agli baat ka intezaar.
+                // Sirf "Hey E.V" — ab agli baat ka intezaar.
                 awaitingCommand = true
                 awaitingSince = now
                 onWake()
@@ -179,7 +186,7 @@ class ContinuousListener(
      */
     private fun afterWakeWord(raw: String): String? {
         val text = raw.lowercase()
-            .replace(Regex("[?!.,;:\"'\u0964]"), " ")
+            .replace(Regex("[?!.,;:\"'।]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
 
@@ -194,6 +201,13 @@ class ContinuousListener(
         }
 
         if (tokens[i] !in NAMES) return null
+
+        // "a", "e", "ई" jaise chhote naam sirf tab wake karte hain jab unke
+        // baad "v" wala hissa bhi suna ho. Warna har doosri baat wake ban jati.
+        val ambiguous = tokens[i] in AMBIGUOUS_NAMES
+        val tail = tokens.getOrNull(i + 1)
+        if (ambiguous && (tail == null || tail !in NAME_TAILS)) return null
+
         i++
 
         // "e" + "v" alag alag aaye ho to doosra hissa bhi nigal lo.
@@ -222,7 +236,7 @@ class ContinuousListener(
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
             SpeechRecognizer.ERROR_CLIENT,
             -> {
-                // Engine atak gaya \u2014 naya banana padta hai.
+                // Engine atak gaya — naya banana padta hai.
                 release()
                 restart(BUSY_RETRY_MS)
             }
