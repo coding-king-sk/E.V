@@ -7,6 +7,7 @@ package com.ev.android.feature.launcher
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -67,6 +68,7 @@ import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.media.MediaAction
 import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
+import com.ev.android.feature.voice.EvListeningService
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import kotlinx.coroutines.launch
@@ -114,9 +116,11 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var accessibilityOn by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
 
     LaunchedEffect(Unit) {
         accessibilityOn = AccessibilityHelper.isEnabled(context)
+        handsFree = EvListeningService.isRunning
         installedApps = InstalledAppsRepository.load(context)
         loadingApps = false
     }
@@ -175,6 +179,46 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         // Permission mile ya na mile, command chala dete hain \u2014 executor khud
         // fallback karta hai (SMS draft, dialer, ya saaf error message).
         if (queued != null) dispatch(queued)
+    }
+
+    val micLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted ->
+        if (granted[Manifest.permission.RECORD_AUDIO] == true) {
+            EvListeningService.start(context)
+            handsFree = true
+            notify("Ab bas \"Hey E.V\" bolo")
+        } else {
+            handsFree = false
+            notify("Mic ki permission ke bina hands-free nahi chalega")
+        }
+    }
+
+    fun toggleHandsFree() {
+        if (EvListeningService.isRunning) {
+            EvListeningService.stop(context)
+            handsFree = false
+            notify("Hands-free band")
+            return
+        }
+
+        val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val missing = needed.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missing.isNotEmpty()) {
+            micLauncher.launch(missing.toTypedArray())
+            return
+        }
+
+        EvListeningService.start(context)
+        handsFree = true
+        notify("Ab bas \"Hey E.V\" bolo")
     }
 
     /** Permission maango (agar chahiye) phir command chalao. */
@@ -250,6 +294,13 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             TopAppBar(
                 title = { Text("E.V") },
                 actions = {
+                    IconButton(onClick = { toggleHandsFree() }) {
+                        Text(
+                            text = if (handsFree) "\uD83D\uDC42" else "\uD83D\uDCA4",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                    }
+
                     IconButton(
                         onClick = {
                             speakReplies = !speakReplies
