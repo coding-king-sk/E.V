@@ -6,6 +6,9 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.ev.android.feature.command.EvCommand
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Ek command ka record.
@@ -95,13 +98,16 @@ object CommandHistory {
         is EvCommand.OpenApp -> "App kholo: " + command.target.label
         is EvCommand.PlayMedia -> "Chalao \"" + command.query + "\" (" + command.target.label + ")"
         is EvCommand.SearchInApp -> "Search \"" + command.query + "\" (" + command.target.label + ")"
-        is EvCommand.SendWhatsApp -> "WhatsApp → " + (command.contactName ?: "?")
-        is EvCommand.SendSms -> "SMS → " + command.contactName
-        is EvCommand.CallContact -> "Call → " + command.contactName
+        is EvCommand.SendWhatsApp -> "WhatsApp \u2192 " + (command.contactName ?: "?")
+        is EvCommand.SendSms -> "SMS \u2192 " + command.contactName
+        is EvCommand.CallContact -> "Call \u2192 " + command.contactName
         is EvCommand.Media -> "Media: " + command.action.name
         EvCommand.IdentifySong -> "Gaana pehchano"
         is EvCommand.Timer -> "Timer: " + command.seconds + " second"
         is EvCommand.Alarm -> "Alarm: " + command.hour + ":" + command.minute.toString().padStart(2, '0')
+        is EvCommand.Reminder ->
+            "Reminder " + SimpleDateFormat("d MMM h:mm a", Locale.getDefault())
+                .format(Date(command.at)) + ": " + command.text
         is EvCommand.Device -> "Device: " + command.action.name
         is EvCommand.Unknown -> "Samajh nahi aaya"
     }

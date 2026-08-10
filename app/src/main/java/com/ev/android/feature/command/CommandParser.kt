@@ -19,6 +19,7 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "next gaana" / "gaana roko"            -> Media(NEXT) / Media(PAUSE)
  *  "ye gaana kaun sa hai"                 -> IdentifySong
  *  "5 minute ka timer lagao"              -> Timer(300)
+ *  "kal subah 8 baje yaad dilana ki dawai" -> Reminder(kal 08:00, "dawai")
  *  "torch on karo"                        -> Device(TORCH_ON)
  */
 object CommandParser {
@@ -62,6 +63,13 @@ object CommandParser {
         "dial karo", "dial", "call",
     )
 
+    private val reminderVerbs = listOf(
+        "yaad dila do", "yaad dilado", "yaad dila dena", "yaad dila dijiye",
+        "yaad dilana", "yaad dilao", "yaad dila", "yaad karana", "yaad rakhna",
+        "reminder laga do", "reminder lagao", "reminder set karo", "reminder",
+        "remind me", "remind",
+    )
+
     /** Only stripped from the START/END of a query so song names stay intact. */
     private val fillerWords = setOf(
         "mujhe", "muje", "please", "plz", "zara", "bhai", "abhi", "to", "na", "yaar",
@@ -75,6 +83,16 @@ object CommandParser {
     private val callNoiseWords =
         setOf("call", "phone", "dial", "lagao", "laga", "karo", "kar", "kardo", "do", "milao")
 
+    /** Reminder ke body me se ye sab nikal dena hai — ye time/verb ke shabd hain. */
+    private val reminderNoiseWords = setOf(
+        "yaad", "dila", "dilado", "dilana", "dilao", "dena", "dijiye", "karana", "rakhna",
+        "reminder", "remind", "set", "lagao", "laga", "karo", "kar", "kardo", "do",
+        "kal", "parso", "aaj", "subah", "shaam", "sham", "raat", "dopahar", "night",
+        "morning", "evening", "baje", "baad", "bad", "later", "am", "pm",
+        "minute", "minutes", "min", "mins", "minit", "second", "seconds", "sec", "secs",
+        "ghanta", "ghante", "ghanto", "hour", "hours",
+    )
+
     private val targetSplitRegex =
         Regex("^(.{2,40}?)\\s+(pe|par|pr|me|mein|main|on|in)\\s+(.+)$")
 
@@ -82,6 +100,8 @@ object CommandParser {
         Regex("^(whatsapp|whats app|wa)\\s+(pe|par|pr|me|mein|main|on)\\s+")
 
     private val koRegex = Regex("(^|\\s)ko($|\\s)")
+
+    private val kiRegex = Regex("(^|\\s)(ki|that)\\s+")
 
     // ---------------------------------------------------- media vocabulary
 
@@ -170,6 +190,11 @@ object CommandParser {
 
         // "ye gaana kaun sa hai", "next gaana", "gaana roko", "10 second aage"
         parseMedia(normalized)?.let { return it }
+
+        // "kal subah 8 baje yaad dilana ki dawai leni hai"
+        //
+        // Timer/alarm se pehle, kyunki reminder me bhi "baje" hota hai.
+        parseReminder(normalized)?.let { return it }
 
         // "5 minute ka timer", "subah 7 baje alarm"
         parseTimerOrAlarm(normalized)?.let { return it }
@@ -265,6 +290,41 @@ object CommandParser {
             .split(" ")
             .filter { it.isNotBlank() }
             .all { it in mediaSubjectWords || it in fillerWords || it in connectors }
+    }
+
+    // ------------------------------------------------------------ reminder
+
+    /**
+     * "kal subah 8 baje yaad dilana ki dawai leni hai"
+     *
+     * Body do tarah se milti hai: "ki" ke baad wala hissa (sabse saaf), ya phir
+     * time/verb ke shabd hata ke jo bache. Time na mile to reminder nahi banate
+     * — aisa command AI ke paas chala jata hai, jo behtar guess kar sakta hai.
+     */
+    private fun parseReminder(text: String): EvCommand? {
+        val verb = matchPhrase(text, reminderVerbs) ?: return null
+        val at = TimeParser.reminderMillis(text) ?: return null
+
+        val kiMatch = kiRegex.find(text)
+        val afterKi = if (kiMatch != null) text.substring(kiMatch.range.last + 1).trim() else ""
+
+        val body = if (afterKi.isNotEmpty()) {
+            afterKi
+        } else {
+            text.replace(phraseRegex(verb), " ")
+                .split(" ")
+                .filter { token ->
+                    token.isNotBlank() &&
+                        token.toIntOrNull() == null &&
+                        !token.contains(":") &&
+                        token !in reminderNoiseWords &&
+                        token !in connectors &&
+                        token !in fillerWords
+                }
+                .joinToString(" ")
+        }
+
+        return EvCommand.Reminder(at = at, text = body.ifBlank { "Reminder" })
     }
 
     // ------------------------------------------------------- timer / alarm

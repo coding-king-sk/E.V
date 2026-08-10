@@ -30,6 +30,16 @@
     <!-- "5 minute ka timer lagao" -> phone ki Clock app me set hota hai. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
+    <!--
+        Reminders. SCHEDULE_EXACT_ALARM Android 12+ pe user se maanga jata hai;
+        na mile to E.V inexact alarm pe fallback kar leta hai.
+        RECEIVE_BOOT_COMPLETED isliye ki reboot ke baad pending reminders
+        dobara set ho jayein — Android reboot pe saare alarms bhool jata hai.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <uses-feature
         android:name="android.hardware.camera.flash"
         android:required="false" />
@@ -134,6 +144,16 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Reminder bajne par, aur reboot ke baad reschedule karne ke liye. -->
+        <receiver
+            android:name=".feature.reminders.ReminderReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

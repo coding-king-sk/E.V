@@ -18,6 +18,7 @@ import com.ev.android.feature.media.MediaControls
 import com.ev.android.feature.media.SongIdentifier
 import com.ev.android.feature.media.YouTubeResolver
 import com.ev.android.feature.messaging.SmsSender
+import com.ev.android.feature.reminders.Reminders
 import java.net.URLEncoder
 
 sealed interface CommandResult {
@@ -64,6 +65,16 @@ object CommandExecutor {
                 )
             } else {
                 CommandResult.Failure("Alarm set nahi ho paya \u2014 koi Clock app nahi mili")
+            }
+
+        is EvCommand.Reminder ->
+            if (Reminders.schedule(context, command.at, command.text)) {
+                CommandResult.Success(Reminders.confirmation(command.at, command.text))
+            } else {
+                CommandResult.Failure(
+                    "Reminder set nahi ho paya \u2014 phone ki Settings me E.V ko " +
+                        "'Alarms & reminders' ki permission de do",
+                )
             }
 
         is EvCommand.Device -> {
