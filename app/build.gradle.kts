@@ -12,8 +12,8 @@ android {
         applicationId = "com.ev.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.7.1"
     }
 
     buildTypes {
@@ -44,6 +44,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    // Coroutines har jagah use hote hain (network, contacts, app list). Pehle ye
+    // sirf lifecycle ke through transitively aa rahe the.
+    implementation(libs.kotlinx.coroutines.android)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)

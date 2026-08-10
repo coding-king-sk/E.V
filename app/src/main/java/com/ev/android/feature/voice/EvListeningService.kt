@@ -1,11 +1,13 @@
 package com.ev.android.feature.voice
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -32,7 +34,7 @@ import kotlinx.coroutines.launch
 /**
  * Hands-free mode.
  *
- * Ye foreground service hai (notification ke saath) \u2014 Android background me
+ * Ye foreground service hai (notification ke saath) — Android background me
  * mic use karne hi nahi deta, aur notification se user ko hamesha pata rehta
  * hai ki mic on hai. Chhupa ke sunne wala kaam E.V nahi karta.
  *
@@ -79,7 +81,24 @@ class EvListeningService : Service() {
         isRunning = true
 
         createChannel()
-        startForegroundCompat()
+
+        // Mic permission ke bina Android 14+ pe "microphone" type ka foreground
+        // service start karna SecurityException deta hai. Ye tab hota hai jab
+        // user permission hata de aur system START_STICKY ki wajah se service
+        // dobara chala de — pehle yahan app crash ho jati thi.
+        val micGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        startForegroundCompat(micGranted)
+
+        if (!micGranted) {
+            isRunning = false
+            stopSelf()
+            return
+        }
+
         Speaker.init(this)
 
         listener = ContinuousListener(
@@ -94,7 +113,7 @@ class EvListeningService : Service() {
 
         listener?.start()
 
-        // Chhoti si awaz \u2014 isse turant pata chal jata hai ki service zinda hai.
+        // Chhoti si awaz — isse turant pata chal jata hai ki service zinda hai.
         say("E.V taiyaar hai")
 
         // App list background me load hoti rehti hai; tab tak bhi commands chalte hain.
@@ -108,15 +127,21 @@ class EvListeningService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+
+        // Mic permission na hone ki wajah se listener bana hi nahi — aise me
+        // system ko baar baar service restart karne ka koi fayda nahi.
+        if (listener == null) return START_NOT_STICKY
+
         return START_STICKY
     }
 
     override fun onDestroy() {
         isRunning = false
         safety.removeCallbacksAndMessages(null)
+        val hadListener = listener != null
         listener?.stop()
         listener = null
-        Speaker.shutdown()
+        if (hadListener) Speaker.shutdown()
         scope.cancel()
         super.onDestroy()
     }
@@ -139,7 +164,7 @@ class EvListeningService : Service() {
             }
 
             if (command is EvCommand.Unknown) {
-                // Command nahi hai \u2014 shayad sawaal hai. Groq se jawab le lo.
+                // Command nahi hai — shayad sawaal hai. Groq se jawab le lo.
                 val reply = Conversation.answer(this@EvListeningService, text)
                 say(
                     reply ?: "Samajh nahi aaya. Settings me Groq key daal do to " +
@@ -184,7 +209,11 @@ class EvListeningService : Service() {
         getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
 
-    private fun startForegroundCompat() {
+    /**
+     * @param withMicType sirf tab true jab RECORD_AUDIO mila ho. Bina permission
+     *   ke microphone type dena Android 14+ pe crash karata hai.
+     */
+    private fun startForegroundCompat(withMicType: Boolean) {
         val stopIntent = PendingIntent.getService(
             this,
             0,
@@ -202,12 +231,14 @@ class EvListeningService : Service() {
             .addAction(0, "Band karo", stopIntent)
             .build()
 
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val type = if (withMicType && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         } else {
             0
         }
 
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+        runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+        }
     }
 }

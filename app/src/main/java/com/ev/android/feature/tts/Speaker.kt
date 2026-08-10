@@ -14,14 +14,14 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Teen cheezein khaas hain:
  *
- * 1. **Google engine force** \u2014 phone ka default engine (Samsung/Xiaomi wala)
+ * 1. **Google engine force** — phone ka default engine (Samsung/Xiaomi wala)
  *    robot jaisa bolta hai. Hum jaan bujh ke `com.google.android.tts` pakadte
  *    hain. Wo na mile tabhi default pe girte hain.
  *
- * 2. **Sabse acchi awaz** \u2014 engine ke saari voices me se highest quality wali
+ * 2. **Sabse acchi awaz** — engine ke saari voices me se highest quality wali
  *    Hindi voice chunte hain. Network voices sabse natural hoti hain.
  *
- * 3. **Refcount + onDone** \u2014 UI aur listening service dono ek hi engine share
+ * 3. **Refcount + onDone** — UI aur listening service dono ek hi engine share
  *    karte hain, aur hands-free mode ko pata chalta rehta hai ki bolna kab
  *    khatam hua (tab tak mic band rehta hai).
  */
@@ -48,7 +48,7 @@ object Speaker {
 
     /**
      * @param onVoiceDataMissing tab chalta hai jab acchi Hindi awaz phone me
-     *   nahi hai \u2014 UI isse download screen khol deti hai.
+     *   nahi hai — UI isse download screen khol deti hai.
      */
     @Synchronized
     fun init(context: Context, onVoiceDataMissing: (() -> Unit)? = null) {
@@ -56,7 +56,7 @@ object Speaker {
 
         users++
         if (engine != null) {
-            // Engine pehle se ready hai par awaz missing thi \u2014 UI ko abhi bata do.
+            // Engine pehle se ready hai par awaz missing thi — UI ko abhi bata do.
             if (needsVoiceData) main.post { this.onVoiceDataMissing?.invoke() }
             return
         }
@@ -80,6 +80,10 @@ object Speaker {
 
         val tts = engine
         if (tts == null || !ready) {
+            // Engine abhi taiyaar nahi. Purani pending line ka callback yahin
+            // chala do, warna wo hamesha ke liye kho jata hai aur hands-free
+            // mode ka mic safety timeout tak band pada rehta hai.
+            pending?.second?.let { previous -> main.post(previous) }
             pending = text to onDone
             return
         }
@@ -115,7 +119,8 @@ object Speaker {
         val tts = engine
 
         if (status != TextToSpeech.SUCCESS || tts == null) {
-            // Google engine se init fail hua \u2014 default engine pe wapas.
+            // Google engine se init fail hua — default engine pe wapas.
+            ready = false
             if (triedGoogle) {
                 triedGoogle = false
                 val app = appContext ?: return
