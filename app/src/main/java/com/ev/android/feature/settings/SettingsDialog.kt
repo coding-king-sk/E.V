@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.ev.android.feature.permissions.PermissionsSection
 import com.ev.android.feature.wakeword.SherpaWakeWord
 import com.ev.android.feature.wakeword.WakeWordModel
 import kotlinx.coroutines.launch
@@ -58,6 +59,13 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
         title = { Text("Settings") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+
+                // Onboarding hat gaya hai, isliye permissions ka poora hisaab
+                // ab yahan sabse upar hai.
+                PermissionsSection()
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
                 Text(
                     text = "Jo command E.V khud na samajh paye, wahi AI ko bheja jayega. " +
                         "Baaki sab pehle jaisa offline hi chalega.",
@@ -142,7 +150,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                 if (!libraryOk) {
                     Text(
                         text = "\u26A0 Native library is phone pe nahi mili. Offline wake " +
-                            "word kaam nahi karega — app Google recognizer pe chalti " +
+                            "word kaam nahi karega \u2014 app Google recognizer pe chalti " +
                             "rahegi.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
@@ -224,7 +232,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                 )
 
                 Text(
-                    text = "Yahan seedha \"E.V\" likhne se kaam nahi chalega — keyword " +
+                    text = "Yahan seedha \"E.V\" likhne se kaam nahi chalega \u2014 keyword " +
                         "model ke tokens me likhna padta hai. Khaali chhod do to model " +
                         "ki apni keywords.txt chalegi.",
                     style = MaterialTheme.typography.bodySmall,
