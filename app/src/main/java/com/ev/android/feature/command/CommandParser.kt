@@ -165,7 +165,7 @@ object CommandParser {
 
         val normalized = normalize(raw)
 
-        // Device toggles pehle \u2014 "torch on karo" ko app-launcher parse na kar de.
+        // Device toggles pehle — "torch on karo" ko app-launcher parse na kar de.
         parseDevice(normalized)?.let { return it }
 
         // "ye gaana kaun sa hai", "next gaana", "gaana roko", "10 second aage"
@@ -288,6 +288,14 @@ object CommandParser {
     private fun parseCall(text: String): EvCommand? {
         val verb = matchPhrase(text, callVerbs) ?: return null
 
+        // "call" aur "dial" akele bahut aam shabd hain: "call of duty kholo",
+        // "dial pad kholo" — inhe call samajh ke dialer khol dena galat hai.
+        // Isliye call tabhi maano jab ya to poora phrase bola gaya ho
+        // ("call lagao", "phone karo"), ya "<naam> ko" wali shape ho.
+        val explicitPhrase = verb.contains(" ")
+        val hasKo = koRegex.containsMatchIn(text)
+        if (!explicitPhrase && !hasKo) return null
+
         val withoutVerb = text.replace(phraseRegex(verb), " ").replace(koRegex, " ")
         val name = normalize(withoutVerb)
             .split(" ")
@@ -358,7 +366,7 @@ object CommandParser {
      * Device commands.
      *
      * Ambiguous words (volume / brightness) tabhi count hote hain jab saath me
-     * koi up/down/on/off word ho \u2014 warna "sound of music lagao" bhi device
+     * koi up/down/on/off word ho — warna "sound of music lagao" bhi device
      * command ban jata.
      */
     private fun parseDevice(text: String): EvCommand.Device? {
@@ -415,7 +423,7 @@ object CommandParser {
 
             has(dataWords) && hasModifier -> DeviceAction.MOBILE_DATA
 
-            // "settings kholo" \u2014 sirf tab jab koi app ka naam saath me na ho.
+            // "settings kholo" — sirf tab jab koi app ka naam saath me na ho.
             has(settingsWords) && matchPhrase(text, openVerbs) != null -> DeviceAction.SETTINGS
 
             else -> null
