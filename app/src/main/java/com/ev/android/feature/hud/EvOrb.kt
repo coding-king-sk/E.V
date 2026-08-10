@@ -10,34 +10,29 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import com.ev.android.ui.theme.EvGreen
 import com.ev.android.ui.theme.EvGreenGlow
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Beech wala glowing orb.
+ * Beech wala ghoomta hua orb — bindiyon se bana globe.
  *
- * Ye sirf sajawat nahi hai — iski chaal se ek nazar me pata chal jata hai ki
+ * Ye sirf sajawat nahi hai; iski chaal se ek nazar me pata chal jata hai ki
  * E.V kis haalat me hai:
  *
- *  - dheemi saans jaisi pulse  -> ready, kuch nahi ho raha
- *  - tez pulse + tez ghoomta ring -> sun raha hai / kaam kar raha hai
+ *  - dheeme ghoomta globe   -> ready, kuch nahi ho raha
+ *  - tez ghoomta + halka bada -> sun raha hai / kaam kar raha hai
  *
- * Poori cheez Canvas pe bani hai, koi image asset nahi — isliye APK me ek byte
- * bhi extra nahi jata aur har screen size pe sharp dikhta hai.
- *
- * **Stroke ki motai radius ke hisaab se hai, fixed px me nahi.** Pehle 1.5f px
- * likha tha, jo 3x density wale phone pe itna patla ho jata tha ki rings dikhti
- * hi nahi thi.
+ * Poori cheez Canvas pe bani hai, koi GIF ya image asset nahi. Isliye APK me
+ * ek byte extra nahi jata, har screen size pe sharp rehta hai, aur rang theme
+ * ke saath badla ja sakta hai. GIF chalane ke liye alag image library (Coil
+ * jaisi) add karni padti, jo sirf ek animation ke liye zyada hai.
  */
 @Composable
 fun EvOrb(
@@ -50,25 +45,12 @@ fun EvOrb(
 
     val active = listening || busy
 
-    val pulse by transition.animateFloat(
-        initialValue = 0.90f,
-        targetValue = if (active) 1.10f else 1.02f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (active) 650 else 2200,
-                easing = FastOutSlowInEasing,
-            ),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "pulse",
-    )
-
     val spin by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = if (active) 6000 else 24000,
+                durationMillis = if (active) 7000 else 20000,
                 easing = LinearEasing,
             ),
             repeatMode = RepeatMode.Restart,
@@ -76,77 +58,84 @@ fun EvOrb(
         label = "spin",
     )
 
-    // Pehle ye 0.35 tha aur orb hamesha isi haalat me rehta tha — isliye poora
-    // design phika lagta tha. Ab dimmed sirf halka sa farak daalta hai.
-    val fade = if (dimmed) 0.85f else 1f
+    val pulse by transition.animateFloat(
+        initialValue = 0.97f,
+        targetValue = if (active) 1.06f else 1.00f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = if (active) 700 else 2400,
+                easing = FastOutSlowInEasing,
+            ),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pulse",
+    )
+
+    // Ek hi baar bante hain, har frame pe nahi — warna 800 se zyada point ka
+    // hisaab 60 baar per second hota rehta.
+    val dots = remember {
+        evenlySpread(540) +
+            ring(0f, 96) +
+            ring(0.80f, 54) + ring(0.90f, 40) +
+            ring(-0.80f, 54) + ring(-0.90f, 40)
+    }
+
+    val fade = if (dimmed) 0.75f else 1f
 
     Canvas(modifier = modifier) {
-        val radius = size.minDimension / 2f
-        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension / 2f * 0.92f * pulse
+        val cx = size.width / 2f
+        val cy = size.height / 2f
 
-        // Andar ka glow — beech me sabse tez, kinare pe gayab.
-        val coreRadius = radius * 0.64f * pulse
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    EvGreenGlow.copy(alpha = 1f * fade),
-                    EvGreen.copy(alpha = 0.70f * fade),
-                    EvGreen.copy(alpha = 0.18f * fade),
-                    Color.Transparent,
-                ),
-                center = center,
-                radius = coreRadius,
-            ),
-            radius = coreRadius,
-            center = center,
-        )
+        val angle = (spin * PI / 180.0).toFloat()
+        val cosA = cos(angle)
+        val sinA = sin(angle)
 
-        // Bahar wali saaf ring — design me sabse numaya cheez yahi hai.
-        drawCircle(
-            color = EvGreen.copy(alpha = 0.95f * fade),
-            radius = radius * 0.62f,
-            center = center,
-            style = Stroke(width = radius * 0.013f),
-        )
+        dots.forEach { dot ->
+            // Y axis ke around ghumao, phir seedha flat kar do.
+            val x = dot.x * cosA + dot.z * sinA
+            val z = -dot.x * sinA + dot.z * cosA
 
-        // Andar ki do halki rings — gehrai ke liye.
-        drawCircle(
-            color = EvGreen.copy(alpha = 0.45f * fade),
-            radius = radius * 0.46f,
-            center = center,
-            style = Stroke(width = radius * 0.009f),
-        )
-        drawCircle(
-            color = EvGreen.copy(alpha = 0.30f * fade),
-            radius = radius * 0.31f,
-            center = center,
-            style = Stroke(width = radius * 0.008f),
-        )
+            // 0 = globe ke peeche, 1 = bilkul saamne.
+            val depth = (z + 1f) / 2f
 
-        // Bahar ka tick ring — ghoomta rehta hai.
-        rotate(degrees = spin, pivot = center) {
-            val ticks = 56
-            for (index in 0 until ticks) {
-                val angle = (2.0 * PI * index / ticks).toFloat()
-                val isLong = index % 4 == 0
-
-                val inner = radius * if (isLong) 0.80f else 0.87f
-                val outer = radius * 0.97f
-
-                drawLine(
-                    color = EvGreen.copy(alpha = (if (isLong) 0.95f else 0.55f) * fade),
-                    start = Offset(
-                        center.x + cos(angle) * inner,
-                        center.y + sin(angle) * inner,
-                    ),
-                    end = Offset(
-                        center.x + cos(angle) * outer,
-                        center.y + sin(angle) * outer,
-                    ),
-                    strokeWidth = radius * if (isLong) 0.020f else 0.012f,
-                    cap = StrokeCap.Round,
-                )
-            }
+            drawCircle(
+                color = if (depth > 0.55f) EvGreenGlow else EvGreen,
+                radius = radius * (0.004f + 0.008f * depth),
+                center = Offset(cx + x * radius, cy + dot.y * radius),
+                alpha = ((0.12f + 0.88f * depth * depth) * fade).coerceIn(0f, 1f),
+            )
         }
+    }
+}
+
+private class Dot(val x: Float, val y: Float, val z: Float)
+
+/**
+ * Gole pe barabar failaye hue points.
+ *
+ * Seedha random ya lat/long grid lene se dots poles pe ikatthe ho jate hain
+ * aur equator khaali dikhta hai. Golden angle wala tareeka har point ko
+ * barabar jagah deta hai.
+ */
+private fun evenlySpread(count: Int): List<Dot> {
+    val golden = PI * (3.0 - sqrt(5.0))
+
+    return List(count) { index ->
+        val y = 1f - (index / (count - 1).toFloat()) * 2f
+        val r = sqrt((1f - y * y).coerceAtLeast(0f))
+        val theta = (golden * index).toFloat()
+
+        Dot(cos(theta) * r, y, sin(theta) * r)
+    }
+}
+
+/** Ek nishchit unchai pe dots ka gol chhalla. */
+private fun ring(y: Float, count: Int): List<Dot> {
+    val r = sqrt((1f - y * y).coerceAtLeast(0f))
+
+    return List(count) { index ->
+        val angle = (2.0 * PI * index / count).toFloat()
+        Dot(cos(angle) * r, y, sin(angle) * r)
     }
 }

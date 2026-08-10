@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -20,7 +18,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ev.android.feature.accessibility.AccessibilityHelper
+import com.ev.android.feature.hud.EvDialogButton
+import com.ev.android.feature.hud.EvDialogHint
+import com.ev.android.feature.hud.EvDialogTitle
+import com.ev.android.ui.theme.EvGreen
+import com.ev.android.ui.theme.EvRed
+import com.ev.android.ui.theme.EvTextPrimary
 
 /**
  * Settings ke andar dikhne wali permission list.
@@ -45,22 +50,22 @@ fun PermissionsSection(modifier: Modifier = Modifier) {
     val missing = remember(refresh) { AppPermissions.missing(context) }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(text = "Permissions", style = MaterialTheme.typography.titleSmall)
+        EvDialogTitle("Permissions")
 
-        Text(
+        EvDialogHint(
             text = if (missing.isEmpty()) {
                 "Saari permissions mil chuki hain."
             } else {
                 "${missing.size} permission abhi baaki hain."
             },
-            style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )
 
         if (missing.isNotEmpty()) {
-            TextButton(onClick = { permissionLauncher.launch(missing.toTypedArray()) }) {
-                Text("Sab allow karo")
-            }
+            EvDialogButton(
+                label = "Sab allow karo",
+                onClick = { permissionLauncher.launch(missing.toTypedArray()) },
+            )
         }
 
         items.forEach { item ->
@@ -135,17 +140,17 @@ fun PermissionsSection(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            TextButton(onClick = { refresh++ }) { Text("Dobara check karo") }
-            TextButton(onClick = { AppPermissions.openAppSettings(context) }) {
-                Text("App settings")
-            }
+            EvDialogButton(label = "Dobara check karo", onClick = { refresh++ })
+            EvDialogButton(
+                label = "App settings",
+                onClick = { AppPermissions.openAppSettings(context) },
+            )
         }
 
-        Text(
+        EvDialogHint(
             text = "Agar allow karne pe koi dialog hi na aaye, to matlab aapne pehle " +
                 "\"Don't ask again\" daba diya hai \u2014 phir \"App settings\" se hi " +
                 "deni padegi.",
-            style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )
     }
@@ -160,7 +165,11 @@ private fun PermissionRow(
     onAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxWidth().padding(top = 12.dp)) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -168,18 +177,20 @@ private fun PermissionRow(
         ) {
             Text(
                 text = (if (granted) "\u2713 " else "\u2715 ") + label,
-                style = MaterialTheme.typography.bodyMedium,
+                color = if (granted) EvGreen else EvTextPrimary,
+                fontSize = 14.sp,
                 modifier = Modifier.weight(1f),
             )
 
             if (!granted) {
-                TextButton(onClick = onAction) { Text(actionLabel) }
+                EvDialogButton(label = actionLabel, onClick = onAction)
             }
         }
 
-        Text(
-            text = why,
-            style = MaterialTheme.typography.bodySmall,
-        )
+        if (!granted) {
+            Text(text = why, color = EvRed.copy(alpha = 0.75f), fontSize = 12.sp, lineHeight = 17.sp)
+        } else {
+            EvDialogHint(text = why)
+        }
     }
 }

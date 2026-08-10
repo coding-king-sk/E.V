@@ -64,7 +64,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.ai.AiCommandResolver
 import com.ev.android.feature.ai.AiOutcome
 import com.ev.android.feature.apps.InstalledApp
@@ -134,12 +133,12 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var busy by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
-    var accessibilityOn by remember { mutableStateOf(false) }
     var apiKeySet by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var showApiKey by remember { mutableStateOf(false) }
     var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
+    var handsFreePaused by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("READY \u2014 BOLO YA LIKHO") }
     var gallery by remember { mutableStateOf<List<EvGallery.Item>>(emptyList()) }
     var galleryLoading by remember { mutableStateOf(false) }
@@ -147,7 +146,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) {
         CommandHistory.load(context)
         Notes.load(context)
-        accessibilityOn = AccessibilityHelper.isEnabled(context)
         apiKeySet = EvSettings.hasApiKey(context)
         handsFree = EvListeningService.isRunning
         installedApps = InstalledAppsRepository.load(context)
@@ -191,7 +189,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
             busy = false
             status = result.message.uppercase()
-            accessibilityOn = AccessibilityHelper.isEnabled(context)
 
             CommandHistory.add(
                 context = context,
@@ -312,6 +309,14 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         notify("Ab bas \"Hey E.V\" bolo")
     }
 
+    /** Mic button ke liye hands-free ko thoda der ke liye rok ke wapas chalu. */
+    fun resumeHandsFree() {
+        if (!handsFreePaused) return
+        handsFreePaused = false
+        EvListeningService.start(context)
+        handsFree = true
+    }
+
     /**
      * App khulte hi hands-free apne aap on.
      *
@@ -393,11 +398,13 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     val startVoice = rememberVoiceCommand(
         onResult = { spoken ->
             listening = false
+            resumeHandsFree()
             input = spoken
             runCommand(spoken)
         },
         onError = {
             listening = false
+            resumeHandsFree()
             notify(it)
         },
     )
@@ -408,8 +415,16 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
      * Whisper tabhi chalta hai jab user ne Settings me khud on kiya ho aur key
      * ho. Baaki har haal me Google recognizer — wo offline bhi kaam kar jata
      * hai, isliye default wahi hai.
+     *
+     * Dono soorat me hands-free service pehle roki jaati hai. Mic ek waqt me
+     * ek hi app ko milta hai, aur service ka recognizer pakde baitha ho to
+     * button dabane pe kuch hota hi nahi.
      */
     fun startListening() {
+        val wasHandsFree = EvListeningService.isRunning
+        if (wasHandsFree) EvListeningService.stop(context)
+        handsFreePaused = wasHandsFree
+
         if (!EvSettings.whisperStt(context)) {
             listening = true
             status = "SUN RAHA HOON\u2026"
@@ -417,21 +432,13 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             return
         }
 
-        // Hands-free service mic pakde baithi ho to Whisper ko mic nahi milega.
-        val wasHandsFree = EvListeningService.isRunning
-        if (wasHandsFree) EvListeningService.stop(context)
-
         listening = true
         status = "SUN RAHA HOON\u2026 (WHISPER)"
 
         scope.launch {
             val result = WhisperInput.listen(context)
             listening = false
-
-            if (wasHandsFree) {
-                EvListeningService.start(context)
-                handsFree = true
-            }
+            resumeHandsFree()
 
             result.fold(
                 onSuccess = { spoken ->
@@ -495,11 +502,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                         listening = listening,
                         busy = busy,
                         status = status,
-                        accessibilityOn = accessibilityOn,
-                        onEnableAccessibility = {
-                            AccessibilityHelper.openSettings(context)
-                            notify("List me 'E.V auto-send' dhoond ke on kar do")
-                        },
                     )
 
                     TAB_NOTES -> NotesPane(
@@ -535,6 +537,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 onStop = {
                     Speaker.stop()
                     listening = false
+                    resumeHandsFree()
                     status = "READY \u2014 BOLO YA LIKHO"
                 },
                 onMic = { startListening() },
@@ -612,14 +615,19 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     }
 }
 
-/** Beech wala shaant sa screen — sirf orb aur ek line status. */
+/**
+ * Beech wala shaant sa screen — sirf orb aur ek line status.
+ *
+ * Accessibility wala "AUTO-SEND / TYPING OFF" button yahan se hata diya hai;
+ * wo ab Settings > Permissions me apne baaki bhaiyon ke saath hai. Home screen
+ * pe use rakhne ka matlab tha ki jab tak permission na do, ek chetavni hamesha
+ * saamne padi rehti thi.
+ */
 @Composable
 private fun CommandPane(
     listening: Boolean,
     busy: Boolean,
     status: String,
-    accessibilityOn: Boolean,
-    onEnableAccessibility: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -627,13 +635,11 @@ private fun CommandPane(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Pehle yahan dimmed = !listening && !busy tha, yaani aam haalat me orb
-        // hamesha 35% alpha pe — isliye poora design phika dikhta tha.
         EvOrb(
             listening = listening,
             busy = busy,
             dimmed = false,
-            modifier = Modifier.size(230.dp),
+            modifier = Modifier.size(250.dp),
         )
 
         Text(
@@ -647,25 +653,6 @@ private fun CommandPane(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 26.dp, start = 12.dp, end = 12.dp),
         )
-
-        if (!accessibilityOn) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 22.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(BorderStroke(1.dp, EvOutline), RoundedCornerShape(14.dp))
-                    .background(EvSurfaceHigh)
-                    .clickable(onClick = onEnableAccessibility)
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-            ) {
-                Text(
-                    text = "AUTO-SEND / TYPING OFF \u2014 ON KARO",
-                    color = EvTextMuted,
-                    fontSize = 12.sp,
-                    letterSpacing = 1.sp,
-                )
-            }
-        }
     }
 }
 
