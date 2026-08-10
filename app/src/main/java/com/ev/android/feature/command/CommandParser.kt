@@ -1,6 +1,7 @@
 package com.ev.android.feature.command
 
 import com.ev.android.feature.apps.InstalledApp
+import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.launcher.AppCatalog
 
 private enum class Verb { PLAY, OPEN, SEARCH }
@@ -10,10 +11,10 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *
  * Examples:
  *  "youtube pe paisa song lagao"          -> PlayMedia("paisa song", YouTube)
- *  "paisa wala gaana baja do"             -> PlayMedia("paisa wala gaana", YouTube)
- *  "spotify pe tum hi ho lagao"           -> PlayMedia("tum hi ho", Spotify)
  *  "whatsapp kholo"                       -> OpenApp(WhatsApp)
  *  "rehan ko bolo ki main aa raha hoon"   -> SendWhatsApp("rehan", "main aa raha hoon")
+ *  "torch on karo"                        -> Device(TORCH_ON)
+ *  "volume badhao"                        -> Device(VOLUME_UP)
  */
 object CommandParser {
 
@@ -24,7 +25,7 @@ object CommandParser {
         "laga do", "lagaa do", "lagado", "laga de", "lagade", "lagao", "lagaao", "laga",
         "baja do", "bajado", "baja de", "bajade", "bajao",
         "chala do", "chalado", "chala de", "chalao",
-        "suna do", "sunado", "sunao", "song",
+        "suna do", "sunado", "sunao",
         "play karo", "play kar", "play kardo", "play",
     )
 
@@ -65,15 +66,44 @@ object CommandParser {
     private val whatsappPrefixRegex =
         Regex("^(whatsapp|whats app|wa)\\s+(pe|par|pr|me|mein|main|on)\\s+")
 
+    // ---------------------------------------------------- device vocabulary
+
+    private val onWords = listOf("on", "chalu", "chaalu", "jala", "jalao", "jala do", "enable", "start")
+    private val offWords = listOf("off", "band", "bandh", "bujha", "bujhao", "bujha do", "disable", "close")
+    private val upWords = listOf("badha", "badhao", "bada do", "increase", "up", "tez", "zyada", "jyada")
+    private val downWords = listOf("kam", "ghata", "ghatao", "decrease", "down", "dheema", "halka")
+    private val maxWords = listOf("full", "max", "maximum", "poora", "pura")
+    private val minWords = listOf("min", "minimum", "sabse kam", "lowest")
+
+    private val torchWords = listOf("torch", "tourch", "flashlight", "flash light", "flash", "batti")
+    private val wifiWords = listOf("wifi", "wi-fi", "wi fi", "waifai", "vaifai")
+    private val bluetoothWords = listOf("bluetooth", "blutooth", "bluetuth", "blue tooth")
+    private val dataWords = listOf("mobile data", "internet", "data on", "data off", "data")
+    private val airplaneWords = listOf("airplane", "aeroplane", "flight mode", "hawai jahaj")
+    private val volumeWords = listOf("volume", "awaz", "aawaz", "aavaz", "sound")
+    private val brightnessWords = listOf("brightness", "roshni", "chamak", "screen light")
+    private val muteWords = listOf("mute", "chup")
+    private val silentWords = listOf("silent")
+    private val vibrateWords = listOf("vibrate", "vibration", "kampan")
+    private val ringerWords = listOf("ringtone mode", "ring mode", "normal mode", "general mode")
+    private val screenshotWords = listOf("screenshot", "screen shot", "screen capture")
+    private val lockWords = listOf("screen lock", "lock screen", "phone lock", "lock kar", "lock karo")
+    private val homeWords = listOf("home jao", "home button", "home screen", "home pe jao")
+    private val backWords = listOf("back jao", "back karo", "peeche jao", "wapas jao")
+    private val recentsWords = listOf("recent apps", "recent app", "recents")
+    private val notificationWords = listOf("notification", "notifications")
+    private val settingsWords = listOf("settings", "setting")
+
     fun parse(rawInput: String, installedApps: List<InstalledApp>): EvCommand {
         val raw = rawInput.trim()
         if (raw.isEmpty()) return EvCommand.Unknown(raw)
 
         val normalized = normalize(raw)
 
-        // WhatsApp messaging is checked first \u2014 it has a very distinctive
-        // "<naam> ko ... <bhejo/bolo>" shape that the app-launch parser would
-        // otherwise mangle.
+        // Device toggles pehle \u2014 "torch on karo" ko app-launcher parse na kar de.
+        parseDevice(normalized)?.let { return it }
+
+        // WhatsApp messaging ki shape ("<naam> ko ... bhejo") bahut distinctive hai.
         parseWhatsAppMessage(normalized)?.let { return it }
 
         var text = normalized
@@ -94,7 +124,6 @@ object CommandParser {
         return when (verb) {
             Verb.PLAY -> when {
                 query.isEmpty() -> target?.let { EvCommand.OpenApp(it) } ?: EvCommand.Unknown(raw)
-                // "spotify chalao" is an open, not a song named "spotify"
                 target == null && resolveApp(query, installedApps) != null ->
                     EvCommand.OpenApp(resolveApp(query, installedApps)!!)
                 else -> EvCommand.PlayMedia(query, target ?: youtube)
@@ -109,11 +138,80 @@ object CommandParser {
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
 
-            // No verb at all: treat the whole thing as an app name.
             null -> (resolveApp(text, installedApps) ?: target)
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
         }
+    }
+
+    /**
+     * Device commands.
+     *
+     * Ambiguous words (volume / brightness) tabhi count hote hain jab saath me
+     * koi up/down/on/off word ho \u2014 warna "sound of music lagao" bhi device
+     * command ban jata.
+     */
+    private fun parseDevice(text: String): EvCommand.Device? {
+        fun has(words: List<String>) = words.any { word -> containsWord(text, word) }
+
+        val wantsOn = has(onWords)
+        val wantsOff = has(offWords)
+        val wantsUp = has(upWords)
+        val wantsDown = has(downWords)
+        val wantsMax = has(maxWords)
+        val wantsMin = has(minWords)
+        val hasModifier = wantsOn || wantsOff || wantsUp || wantsDown || wantsMax || wantsMin
+
+        val action = when {
+            has(torchWords) -> when {
+                wantsOff -> DeviceAction.TORCH_OFF
+                wantsOn -> DeviceAction.TORCH_ON
+                else -> DeviceAction.TORCH_TOGGLE
+            }
+
+            has(wifiWords) -> when {
+                wantsOff -> DeviceAction.WIFI_OFF
+                wantsOn -> DeviceAction.WIFI_ON
+                else -> DeviceAction.WIFI_PANEL
+            }
+
+            has(bluetoothWords) -> DeviceAction.BLUETOOTH
+            has(airplaneWords) -> DeviceAction.AIRPLANE_MODE
+            has(screenshotWords) -> DeviceAction.SCREENSHOT
+            has(lockWords) -> DeviceAction.LOCK_SCREEN
+            has(recentsWords) -> DeviceAction.RECENTS
+            has(homeWords) -> DeviceAction.HOME
+            has(backWords) -> DeviceAction.BACK
+            has(notificationWords) -> DeviceAction.NOTIFICATIONS
+            has(vibrateWords) -> DeviceAction.RINGER_VIBRATE
+            has(ringerWords) -> DeviceAction.RINGER_NORMAL
+
+            has(volumeWords) && hasModifier -> when {
+                has(muteWords) -> DeviceAction.VOLUME_MUTE
+                wantsMax -> DeviceAction.VOLUME_MAX
+                wantsDown || wantsOff -> DeviceAction.VOLUME_DOWN
+                else -> DeviceAction.VOLUME_UP
+            }
+
+            has(volumeWords) && has(muteWords) -> DeviceAction.VOLUME_MUTE
+            has(silentWords) -> DeviceAction.RINGER_SILENT
+
+            has(brightnessWords) && hasModifier -> when {
+                wantsMax -> DeviceAction.BRIGHTNESS_MAX
+                wantsMin -> DeviceAction.BRIGHTNESS_MIN
+                wantsDown || wantsOff -> DeviceAction.BRIGHTNESS_DOWN
+                else -> DeviceAction.BRIGHTNESS_UP
+            }
+
+            has(dataWords) && hasModifier -> DeviceAction.MOBILE_DATA
+
+            // "settings kholo" \u2014 sirf tab jab koi app ka naam saath me na ho.
+            has(settingsWords) && matchPhrase(text, openVerbs) != null -> DeviceAction.SETTINGS
+
+            else -> null
+        }
+
+        return action?.let { EvCommand.Device(it) }
     }
 
     /**
@@ -125,10 +223,7 @@ object CommandParser {
         val mentionsWhatsApp = text.contains("whatsapp") || text.contains("whats app")
         val stripped = text.replace(whatsappPrefixRegex, "").trim()
 
-        val koMatch = Regex("\\s+ko\\s+").find(stripped) ?: run {
-            // "whatsapp kholo" and friends are NOT messages.
-            return null
-        }
+        val koMatch = Regex("\\s+ko\\s+").find(stripped) ?: return null
 
         val namePart = cleanName(stripped.substring(0, koMatch.range.first))
         var rest = stripped.substring(koMatch.range.last + 1).trim()
@@ -136,16 +231,13 @@ object CommandParser {
 
         val verb = matchPhrase(rest, messageVerbs)
 
-        // Without an explicit whatsapp mention we need a messaging verb,
-        // otherwise "usko lagao" would be misread as a message.
         if (verb == null && !mentionsWhatsApp) return null
         if (namePart.isEmpty()) return null
 
         val body = if (verb == null) {
             stripNoise(rest)
         } else {
-            val regex = phraseRegex(verb)
-            val match = regex.find(rest)
+            val match = phraseRegex(verb).find(rest)
             if (match == null) {
                 stripNoise(rest)
             } else {
@@ -163,11 +255,10 @@ object CommandParser {
         return EvCommand.SendWhatsApp(contactName = namePart, message = body)
     }
 
-    private fun cleanName(input: String): String {
-        val tokens = normalize(input).split(" ")
-            .filter { it.isNotBlank() && it !in messageNoiseWords && it !in connectors && it !in fillerWords }
-        return tokens.joinToString(" ")
-    }
+    private fun cleanName(input: String): String = normalize(input)
+        .split(" ")
+        .filter { it.isNotBlank() && it !in messageNoiseWords && it !in connectors && it !in fillerWords }
+        .joinToString(" ")
 
     private fun stripNoise(input: String): String {
         val tokens = normalize(input).split(" ").filter { it.isNotBlank() }.toMutableList()
@@ -218,6 +309,9 @@ object CommandParser {
         .replace(Regex("[?!.,;:\"']"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
+
+    private fun containsWord(text: String, word: String): Boolean =
+        phraseRegex(word).containsMatchIn(text)
 
     private fun detectVerb(text: String): Verb? = when {
         matchPhrase(text, playVerbs) != null -> Verb.PLAY

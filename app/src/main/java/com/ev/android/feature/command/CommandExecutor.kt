@@ -5,8 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import com.ev.android.feature.accessibility.AccessibilityHelper
+import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.contacts.ContactsRepository
 import com.ev.android.feature.contacts.PhoneNumbers
+import com.ev.android.feature.device.DeviceControls
 import com.ev.android.feature.launcher.AppLauncher
 import com.ev.android.feature.media.YouTubeResolver
 import java.net.URLEncoder
@@ -27,6 +30,11 @@ object CommandExecutor {
         is EvCommand.PlayMedia -> playMedia(context, command.query, command.target)
         is EvCommand.SearchInApp -> searchInApp(context, command.query, command.target)
         is EvCommand.SendWhatsApp -> sendWhatsApp(context, command.contactName, command.message)
+        is EvCommand.Device -> {
+            val result = DeviceControls.run(context, command.action)
+            if (result.ok) CommandResult.Success(result.message)
+            else CommandResult.Failure(result.message)
+        }
         is EvCommand.Unknown -> CommandResult.Failure(
             "Samajh nahi aaya: \"${command.raw}\". Try: \"YouTube pe paisa song lagao\""
         )
@@ -66,7 +74,6 @@ object CommandExecutor {
     ): CommandResult {
         val pkg = target.packageName
 
-        // 1. YouTube: resolve the first result and open it directly.
         if (pkg == null || pkg == YOUTUBE_PACKAGE) {
             val videoId = YouTubeResolver.firstVideoId(query)
             if (videoId != null && openYouTubeVideo(context, videoId)) {
@@ -74,22 +81,18 @@ object CommandExecutor {
             }
         }
 
-        // 2. Ask the target app to play it (works well for Spotify / YT Music).
         if (pkg != null && startPlayFromSearch(context, query, pkg)) {
             return CommandResult.Success("${target.label} pe \"$query\" play ho raha hai")
         }
 
-        // 3. In-app search screen.
         if (pkg != null && startInAppSearch(context, query, pkg)) {
             return CommandResult.Success("${target.label} pe \"$query\" search kiya")
         }
 
-        // 4. Any music/video app on the phone.
         if (startPlayFromSearch(context, query, packageName = null)) {
             return CommandResult.Success("\"$query\" play ho raha hai")
         }
 
-        // 5. Results page \u2014 in the app if possible, else browser.
         return openYouTubeResults(context, query, preferPackage = pkg)
     }
 
@@ -102,9 +105,10 @@ object CommandExecutor {
     }
 
     /**
-     * WhatsApp cannot be made to press "send" from an intent \u2014 that is blocked
-     * for security. So E.V opens the right chat with the message already typed,
-     * and you just tap the send arrow.
+     * Right chat kholta hai message already typed ke saath.
+     *
+     * Agar E.V ki Accessibility service on hai to wo Send button khud daba deti
+     * hai \u2014 poora hands-free. Warna user ko ek tap karna padta hai.
      */
     private suspend fun sendWhatsApp(
         context: Context,
@@ -128,6 +132,17 @@ object CommandExecutor {
             }
         }
 
+        val autoSend = AccessibilityHelper.isEnabled(context)
+        if (autoSend) {
+            EvAccessibilityService.armWhatsAppAutoSend()
+        }
+
+        val successMessage = if (autoSend) {
+            "$contactName ko message bheja jaa raha hai\u2026"
+        } else {
+            "$contactName ka chat khul gaya \u2014 send dabao (auto-send ke liye Accessibility on karo)"
+        }
+
         val encoded = URLEncoder.encode(message, "UTF-8").replace("+", "%20")
 
         val deepLink = Intent(
@@ -135,14 +150,15 @@ object CommandExecutor {
             Uri.parse("whatsapp://send?phone=$number&text=$encoded"),
         ).setPackage("com.whatsapp")
         if (AppLauncher.startIntent(context, deepLink)) {
-            return CommandResult.Success("$contactName ka chat khul gaya \u2014 send dabao")
+            return CommandResult.Success(successMessage)
         }
 
         val waMe = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$number?text=$encoded"))
         if (AppLauncher.startIntent(context, waMe)) {
-            return CommandResult.Success("$contactName ka chat khul gaya \u2014 send dabao")
+            return CommandResult.Success(successMessage)
         }
 
+        EvAccessibilityService.cancelAutoSend()
         return CommandResult.Failure("WhatsApp open nahi ho paya")
     }
 

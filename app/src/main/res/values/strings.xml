@@ -1,3 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">E.V</string>
+    <string name="accessibility_service_label">E.V auto-send</string>
+    <string name="accessibility_service_description">E.V ko WhatsApp me \"Send\" button khud dabane deta hai, taaki voice se bheja gaya message aapko manually tap kiye bina chala jaye. Ye service sirf WhatsApp ki screen padhti hai, aur sirf tab jab aapne abhi-abhi E.V se message bhejne ko bola ho.</string>
 </resources>

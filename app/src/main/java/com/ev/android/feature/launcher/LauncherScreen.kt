@@ -34,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,15 +52,36 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
 import com.ev.android.feature.contacts.ContactsRepository
+import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import kotlinx.coroutines.launch
+
+private data class DeviceTile(
+    val label: String,
+    val emoji: String,
+    val action: DeviceAction,
+)
+
+private val deviceTiles = listOf(
+    DeviceTile("Torch", "\uD83D\uDD26", DeviceAction.TORCH_TOGGLE),
+    DeviceTile("WiFi", "\uD83D\uDCF6", DeviceAction.WIFI_PANEL),
+    DeviceTile("Bluetooth", "\uD83D\uDD35", DeviceAction.BLUETOOTH),
+    DeviceTile("Volume +", "\uD83D\uDD0A", DeviceAction.VOLUME_UP),
+    DeviceTile("Volume \u2212", "\uD83D\uDD09", DeviceAction.VOLUME_DOWN),
+    DeviceTile("Silent", "\uD83D\uDD15", DeviceAction.RINGER_SILENT),
+    DeviceTile("Brightness", "\u2600\uFE0F", DeviceAction.BRIGHTNESS_MAX),
+    DeviceTile("Screenshot", "\uD83D\uDDBC\uFE0F", DeviceAction.SCREENSHOT),
+    DeviceTile("Lock", "\uD83D\uDD12", DeviceAction.LOCK_SCREEN),
+    DeviceTile("Settings", "\u2699\uFE0F", DeviceAction.SETTINGS),
+)
 
 @Composable
 fun LauncherScreen(modifier: Modifier = Modifier) {
@@ -73,8 +95,10 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var loadingApps by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
+    var accessibilityOn by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        accessibilityOn = AccessibilityHelper.isEnabled(context)
         installedApps = InstalledAppsRepository.load(context)
         loadingApps = false
     }
@@ -88,6 +112,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             busy = true
             val result = CommandExecutor.execute(context, command)
             busy = false
+            accessibilityOn = AccessibilityHelper.isEnabled(context)
             snackbarHostState.showSnackbar(result.message)
         }
     }
@@ -132,6 +157,10 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     )
 
     val quickShortcuts = remember(input) { AppCatalog.shortcuts.filter { it.matches(input) } }
+    val visibleDeviceTiles = remember(input) {
+        val q = input.trim()
+        if (q.isEmpty()) deviceTiles else deviceTiles.filter { it.label.contains(q, true) }
+    }
     val matchingApps = remember(input, installedApps) {
         val q = input.trim()
         if (q.isEmpty()) installedApps else installedApps.filter { it.label.contains(q, true) }
@@ -186,122 +215,24 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (quickShortcuts.isNotEmpty()) {
+                if (!accessibilityOn) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        SectionHeader("Quick actions")
-                    }
-                    items(quickShortcuts, key = { "quick_${it.id}" }) { shortcut ->
-                        TileCard(
-                            label = shortcut.label,
-                            onClick = {
-                                val message = when (val result = AppLauncher.launch(context, shortcut)) {
-                                    is LaunchResult.Opened -> "${result.label} khul raha hai"
-                                    is LaunchResult.Fallback -> "${result.label}: ${result.reason}"
-                                    is LaunchResult.Failed -> "${result.label} open nahi ho paya"
-                                }
-                                notify(message)
+                        AccessibilityBanner(
+                            onEnable = {
+                                AccessibilityHelper.openSettings(context)
+                                notify("List me 'E.V auto-send' dhoond ke on kar do")
                             },
-                        ) {
-                            Text(shortcut.emoji, style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
-                }
-
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SectionHeader(
-                        when {
-                            loadingApps -> "Phone ke apps load ho rahe hain\u2026"
-                            else -> "Phone ke apps (${matchingApps.size})"
-                        }
-                    )
-                }
-
-                items(matchingApps, key = { "app_${it.packageName}" }) { app ->
-                    TileCard(
-                        label = app.label,
-                        onClick = {
-                            val opened = AppLauncher.launchPackage(context, app.packageName)
-                            notify(
-                                if (opened) "${app.label} khul raha hai"
-                                else "${app.label} open nahi ho paya"
-                            )
-                        },
-                    ) {
-                        val icon = app.icon
-                        if (icon != null) {
-                            Image(
-                                bitmap = icon,
-                                contentDescription = app.label,
-                                modifier = Modifier.size(40.dp),
-                            )
-                        } else {
-                            Text("\uD83D\uDCF1", style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
-                }
-
-                if (!loadingApps && matchingApps.isEmpty() && quickShortcuts.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            text = "Kuch nahi mila. Mic dabake bol ke bhi try kar sakte ho.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 24.dp),
                         )
                     }
                 }
-            }
-        }
-    }
-}
 
-@Composable
-private fun SectionHeader(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = modifier.padding(top = 8.dp, bottom = 4.dp),
-    )
-}
-
-@Composable
-private fun TileCard(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: @Composable () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        modifier = modifier.height(104.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            icon()
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun LauncherScreenPreview() {
-    EVTheme {
-        LauncherScreen()
-    }
-}
+                if (visibleDeviceTiles.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHeader("Device controls")
+                    }
+                    items(visibleDeviceTiles, key = { "device_${it.action.name}" }) { tile ->
+                        TileCard(
+                            label = tile.label,
+                            onClick = { dispatch(EvCommand.Device(tile.action)) },
+                        ) {
+                            
