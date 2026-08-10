@@ -18,10 +18,10 @@ import android.speech.SpeechRecognizer
  *
  * **Wake word ka matching sabse nazuk hissa hai.** Pehle version me exact
  * string match tha aur wo fail ho raha tha, kyunki:
- *  - Hindi engine "Hey E.V" ko Devanagari me likh deta hai ("हे ईवी")
  *  - kabhi "hey ivy", "hey evie", "a v", "hey we" jaisa kuch sunta hai
+ *  - hi-IN engine "Hey E.V" ko Devanagari me likh deta tha ("हे ईवी")
  *
- * Isliye ab exact match ki jagah **token-based** matching hai: pehla shabd
+ * Isliye exact match ki jagah **token-based** matching hai: pehla shabd
  * greeting ho to chhod do, agla shabd "E.V" jaisa lage to jaag jao.
  */
 class ContinuousListener(
@@ -142,11 +142,14 @@ class ContinuousListener(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
             )
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-            // Hinglish ke liye dono — engine jo behtar samjhe.
+            // en-IN = Hinglish Latin script me ("torch on karo"), jaisa
+            // CommandParser chahta hai. hi-IN Devanagari deta tha aur har
+            // command Unknown ban jati thi.
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
             putExtra(
                 RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES,
-                arrayListOf("hi-IN", "en-IN"),
+                arrayListOf("en-IN", "hi-IN"),
             )
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)

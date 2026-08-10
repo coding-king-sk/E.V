@@ -46,9 +46,15 @@ fun rememberVoiceCommand(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
             )
-            // hi-IN handles Hinglish ("youtube pe paisa song lagao") best.
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+            // en-IN hi Hinglish deta hai — Latin script me, jaisa parser chahta
+            // hai ("youtube kholo", "torch on karo"). hi-IN Devanagari me
+            // likhta hai ("टॉर्च ऑन करो") aur parser use pehchan nahi pata.
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
+            putExtra(
+                RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES,
+                arrayListOf("en-IN", "hi-IN"),
+            )
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Boliye\u2026 jaise: YouTube pe paisa song lagao")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
