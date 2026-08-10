@@ -30,7 +30,7 @@ object CommandParser {
         "laga do", "lagaa do", "lagado", "laga de", "lagade", "lagao", "lagaao", "laga",
         "baja do", "bajado", "baja de", "bajade", "bajao",
         "chala do", "chalado", "chala de", "chalao",
-        "suna do", "sunado", "sunao",
+        "suna do", "sunado", "sunao", "song",
         "play karo", "play kar", "play kardo", "play",
     )
 
@@ -48,7 +48,7 @@ object CommandParser {
     private val messageVerbs = listOf(
         "message bhej do", "message bhejo", "message bhejna", "message karo", "message kar",
         "msg bhej do", "msg bhejo", "msg karo",
-        "sms bhej do", "sms bhejo", "sms karo", "sms kar do",
+        "sms bhej do", "sms bhejo", "sms karo", "sms kar do", "sms par",
         "text kar do", "text karo",
         "bhej do", "bhejo", "bhejna", "bhej",
         "likh do", "likho", "likh",
