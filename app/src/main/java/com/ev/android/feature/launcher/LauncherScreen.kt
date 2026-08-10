@@ -6,6 +6,7 @@
 package com.ev.android.feature.launcher
 
 import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -37,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,19 +54,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
-import com.ev.android.feature.contacts.ContactsRepository
 import com.ev.android.feature.device.DeviceAction
+import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.tts.Speaker
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import kotlinx.coroutines.launch
 
 private data class DeviceTile(val label: String, val emoji: String, val action: DeviceAction)
+
+/** action == null ka matlab "ye gaana kaun sa hai". */
+private data class MediaTile(val label: String, val emoji: String, val action: MediaAction?)
 
 private val deviceTiles = listOf(
     DeviceTile("Torch", "\uD83D\uDD26", DeviceAction.TORCH_TOGGLE),
@@ -77,6 +84,16 @@ private val deviceTiles = listOf(
     DeviceTile("Screenshot", "\uD83D\uDDBC", DeviceAction.SCREENSHOT),
     DeviceTile("Lock", "\uD83D\uDD12", DeviceAction.LOCK_SCREEN),
     DeviceTile("Settings", "\u2699", DeviceAction.SETTINGS),
+)
+
+private val mediaTiles = listOf(
+    MediaTile("Pause", "\u23F8", MediaAction.PAUSE),
+    MediaTile("Play", "\u25B6", MediaAction.PLAY),
+    MediaTile("Next", "\u23ED", MediaAction.NEXT),
+    MediaTile("Previous", "\u23EE", MediaAction.PREVIOUS),
+    MediaTile("Aage", "\u23E9", MediaAction.FORWARD),
+    MediaTile("Peeche", "\u23EA", MediaAction.REWIND),
+    MediaTile("Kaun sa gaana?", "\uD83C\uDFA7", null),
 )
 
 @Composable
@@ -92,11 +109,18 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var busy by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
     var accessibilityOn by remember { mutableStateOf(false) }
+    var speakReplies by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         accessibilityOn = AccessibilityHelper.isEnabled(context)
         installedApps = InstalledAppsRepository.load(context)
         loadingApps = false
+    }
+
+    // TTS engine app ke saath hi zinda rehta hai, screen band hote hi chhod dete hain.
+    DisposableEffect(Unit) {
+        Speaker.init(context)
+        onDispose { Speaker.shutdown() }
     }
 
     fun notify(message: String) {
@@ -109,20 +133,44 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             val result = CommandExecutor.execute(context, command)
             busy = false
             accessibilityOn = AccessibilityHelper.isEnabled(context)
+            if (speakReplies) Speaker.speak(result.message)
             snackbarHostState.showSnackbar(result.message)
         }
     }
 
-    val contactsPermission = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
+    /** Sirf wahi permissions jo abhi tak mili nahi hain. */
+    fun missingPermissions(command: EvCommand): List<String> {
+        val needed = when (command) {
+            is EvCommand.SendWhatsApp ->
+                if (command.contactName.isNullOrBlank()) emptyList()
+                else listOf(Manifest.permission.READ_CONTACTS)
+
+            is EvCommand.SendSms -> listOf(
+                Manifest.permission.READ_CONTACTS,
+                Manifest.permission.SEND_SMS,
+            )
+
+            is EvCommand.CallContact -> listOf(
+                Manifest.permission.READ_CONTACTS,
+                Manifest.permission.CALL_PHONE,
+            )
+
+            else -> emptyList()
+        }
+
+        return needed.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { _ ->
         val queued = pendingCommand
         pendingCommand = null
-        when {
-            queued == null -> Unit
-            granted -> dispatch(queued)
-            else -> notify("Contacts permission ke bina naam se message nahi bhej sakta")
-        }
+        // Permission mile ya na mile, command chala dete hain \u2014 executor khud
+        // fallback karta hai (SMS draft, dialer, ya saaf error message).
+        if (queued != null) dispatch(queued)
     }
 
     fun runCommand(text: String) {
@@ -130,14 +178,11 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         keyboard?.hide()
 
         val command = CommandParser.parse(text, installedApps)
+        val missing = missingPermissions(command)
 
-        val needsContacts = command is EvCommand.SendWhatsApp &&
-            !command.contactName.isNullOrBlank() &&
-            !ContactsRepository.hasPermission(context)
-
-        if (needsContacts) {
+        if (missing.isNotEmpty()) {
             pendingCommand = command
-            contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+            permissionLauncher.launch(missing.toTypedArray())
             return
         }
 
@@ -157,6 +202,10 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         val q = input.trim()
         if (q.isEmpty()) deviceTiles else deviceTiles.filter { it.label.contains(q, true) }
     }
+    val visibleMediaTiles = remember(input) {
+        val q = input.trim()
+        if (q.isEmpty()) mediaTiles else mediaTiles.filter { it.label.contains(q, true) }
+    }
     val matchingApps = remember(input, installedApps) {
         val q = input.trim()
         if (q.isEmpty()) installedApps else installedApps.filter { it.label.contains(q, true) }
@@ -164,7 +213,28 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = { TopAppBar(title = { Text("E.V") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("E.V") },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            speakReplies = !speakReplies
+                            if (!speakReplies) Speaker.stop()
+                            notify(
+                                if (speakReplies) "Ab E.V bol ke jawab dega"
+                                else "Awaz band \u2014 sirf screen pe dikhega"
+                            )
+                        },
+                    ) {
+                        Text(
+                            text = if (speakReplies) "\uD83D\uDD0A" else "\uD83D\uDD07",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                    }
+                },
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
@@ -219,6 +289,26 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                                 notify("List me 'E.V auto-send' dhoond ke on kar do")
                             },
                         )
+                    }
+                }
+
+                if (visibleMediaTiles.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHeader("Jo abhi chal raha hai")
+                    }
+                    items(visibleMediaTiles, key = { "media_" + it.label }) { tile ->
+                        TileCard(
+                            label = tile.label,
+                            onClick = {
+                                val action = tile.action
+                                dispatch(
+                                    if (action == null) EvCommand.IdentifySong
+                                    else EvCommand.Media(action)
+                                )
+                            },
+                        ) {
+                            Text(tile.emoji, style = MaterialTheme.typography.headlineMedium)
+                        }
                     }
                 }
 
