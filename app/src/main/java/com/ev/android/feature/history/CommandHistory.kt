@@ -10,13 +10,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Ek command ka record.
- *
- * @param spoken jo user ne bola/likha (jaisa recognizer ne suna)
- * @param understood E.V ne use kya samjha
- * @param reply E.V ne kya jawab diya
- */
 data class HistoryEntry(
     val spoken: String,
     val understood: String,
@@ -108,6 +101,13 @@ object CommandHistory {
         is EvCommand.Reminder ->
             "Reminder " + SimpleDateFormat("d MMM h:mm a", Locale.getDefault())
                 .format(Date(command.at)) + ": " + command.text
+        is EvCommand.TakePhoto -> if (command.front) "Selfie" else "Photo"
+        is EvCommand.RecordVideo -> "Video: " + command.seconds + " second"
+        is EvCommand.TypeText ->
+            "Type \"" + command.text + "\"" +
+                (command.target?.let { " (" + it.label + ")" } ?: "")
+        is EvCommand.Multi ->
+            command.commands.joinToString(" + ") { describe(it) }
         is EvCommand.Device -> "Device: " + command.action.name
         is EvCommand.Unknown -> "Samajh nahi aaya"
     }

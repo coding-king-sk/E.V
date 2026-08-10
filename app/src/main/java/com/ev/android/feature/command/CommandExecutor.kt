@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.calling.Caller
+import com.ev.android.feature.camera.CameraCapture
 import com.ev.android.feature.contacts.ContactsRepository
 import com.ev.android.feature.contacts.PhoneNumbers
 import com.ev.android.feature.daily.DailyTasks
@@ -19,6 +20,7 @@ import com.ev.android.feature.media.SongIdentifier
 import com.ev.android.feature.media.YouTubeResolver
 import com.ev.android.feature.messaging.SmsSender
 import com.ev.android.feature.reminders.Reminders
+import kotlinx.coroutines.delay
 import java.net.URLEncoder
 
 sealed interface CommandResult {
@@ -31,6 +33,9 @@ sealed interface CommandResult {
 object CommandExecutor {
 
     private const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+
+    /** Do kaam ke beech itna gap — warna doosra pehle ke khulne se pehle chal jata hai. */
+    private const val MULTI_GAP_MS = 1500L
 
     suspend fun execute(context: Context, command: EvCommand): CommandResult = when (command) {
         is EvCommand.OpenApp -> openApp(context, command.target)
@@ -77,6 +82,28 @@ object CommandExecutor {
                 )
             }
 
+        is EvCommand.TakePhoto ->
+            if (CameraCapture.takePhoto(context, command.front)) {
+                CommandResult.Success(
+                    if (command.front) "Selfie le raha hoon\u2026" else "Photo le raha hoon\u2026"
+                )
+            } else {
+                CommandResult.Failure("Camera khul nahi paya")
+            }
+
+        is EvCommand.RecordVideo ->
+            if (CameraCapture.recordVideo(context, command.front, command.seconds)) {
+                CommandResult.Success(
+                    command.seconds.toString() + " second ka video bana raha hoon\u2026"
+                )
+            } else {
+                CommandResult.Failure("Camera khul nahi paya")
+            }
+
+        is EvCommand.TypeText -> typeText(context, command)
+
+        is EvCommand.Multi -> runMulti(context, command.commands)
+
         is EvCommand.Device -> {
             val result = DeviceControls.run(context, command.action)
             if (result.ok) CommandResult.Success(result.message)
@@ -85,6 +112,65 @@ object CommandExecutor {
 
         is EvCommand.Unknown -> CommandResult.Failure(
             "Samajh nahi aaya: \"${command.raw}\". Try: \"YouTube pe paisa song lagao\""
+        )
+    }
+
+    /**
+     * Ek ke baad ek kaam.
+     *
+     * Beech me thoda rukte hain kyunki Android app ko khulne me waqt leta hai;
+     * bina gap ke doosri app pehli ko dhakel deti hai.
+     */
+    private suspend fun runMulti(context: Context, commands: List<EvCommand>): CommandResult {
+        if (commands.isEmpty()) return CommandResult.Failure("Kuch karne ko mila hi nahi")
+
+        val messages = mutableListOf<String>()
+        var allOk = true
+
+        commands.forEachIndexed { index, command ->
+            if (index > 0) delay(MULTI_GAP_MS)
+
+            val result = execute(context, command)
+            if (result is CommandResult.Failure) allOk = false
+            messages.add(result.message)
+        }
+
+        val joined = messages.joinToString(", phir ")
+        return if (allOk) CommandResult.Success(joined) else CommandResult.Failure(joined)
+    }
+
+    /**
+     * App ke text box me likhna.
+     *
+     * Intent se kisi doosri app ke text box me likhna Android allow nahi karta,
+     * isliye ye kaam Accessibility service karti hai: pehle usme text "arm"
+     * karte hain, phir app kholte hain — app khulte hi wo focus wale box me
+     * text bhar deti hai.
+     */
+    private fun typeText(context: Context, command: EvCommand.TypeText): CommandResult {
+        if (!AccessibilityHelper.isEnabled(context)) {
+            return CommandResult.Failure(
+                "Type karne ke liye ek baar Accessibility me 'E.V auto-send' on karna padega"
+            )
+        }
+
+        EvAccessibilityService.armTyping(command.text)
+
+        val target = command.target
+        val packageName = target?.packageName
+
+        if (target != null && packageName != null) {
+            if (!AppLauncher.launchPackage(context, packageName)) {
+                EvAccessibilityService.cancelTyping()
+                return CommandResult.Failure(target.label + " open nahi ho payi")
+            }
+            return CommandResult.Success(
+                target.label + " me \"" + command.text + "\" type kar raha hoon"
+            )
+        }
+
+        return CommandResult.Success(
+            "\"" + command.text + "\" type kar raha hoon \u2014 jis box me chahiye us pe tap karo"
         )
     }
 
@@ -108,13 +194,6 @@ object CommandExecutor {
         return CommandResult.Failure("${target.label} open nahi ho paya")
     }
 
-    /**
-     * Search + actually play.
-     *
-     * Step 1 is the important one: MEDIA_PLAY_FROM_SEARCH usually just lands on
-     * YouTube's search screen instead of playing, so we resolve the top result's
-     * video id ourselves and open a /watch deep link, which always autoplays.
-     */
     private suspend fun playMedia(
         context: Context,
         query: String,
@@ -152,12 +231,6 @@ object CommandExecutor {
         return openYouTubeResults(context, query, preferPackage = pkg)
     }
 
-    /**
-     * Right chat kholta hai message already typed ke saath.
-     *
-     * Agar E.V ki Accessibility service on hai to wo Send button khud daba deti
-     * hai \u2014 poora hands-free. Warna user ko ek tap karna padta hai.
-     */
     private suspend fun sendWhatsApp(
         context: Context,
         contactName: String?,
@@ -200,10 +273,6 @@ object CommandExecutor {
         return CommandResult.Failure("WhatsApp open nahi ho paya")
     }
 
-    /**
-     * SMS \u2014 yahan Android sach me auto-send karne deta hai, isliye WhatsApp
-     * wali accessibility trick ki zaroorat nahi.
-     */
     private suspend fun sendSms(
         context: Context,
         contactName: String,
@@ -238,7 +307,7 @@ object CommandExecutor {
         }
     }
 
-    /** Naam ya seedha number \u2014 dono se phone number nikalta hai. */
+    /** Naam ya seedha number — dono se phone number nikalta hai. */
     private suspend fun resolveNumber(context: Context, contactName: String): String? = when {
         PhoneNumbers.looksLikeNumber(contactName) -> PhoneNumbers.normalize(contactName)
         else -> ContactsRepository.findByName(context, contactName)?.phone

@@ -19,6 +19,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        "Photo lo" / "video banao".
+        Android 9 aur usse purane phones me gallery me save karne ke liye storage
+        permission chahiye; Android 10+ me MediaStore khud sambhal leta hai.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <!-- Device controls -->
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -40,6 +50,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
     <uses-feature
         android:name="android.hardware.camera.flash"
         android:required="false" />
@@ -106,6 +119,7 @@
         <package android:name="com.jio.media.jiobeats" />
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.instagram.android" />
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.shazam.android" />
         <package android:name="com.google.android.deskclock" />
@@ -126,6 +140,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Photo/video lene wali patli activity. Recents me nahi dikhti aur
+            kaam khatam hote hi khud band ho jati hai.
+        -->
+        <activity
+            android:name=".feature.camera.CameraCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.EV"
+            tools:ignore="LockedOrientationActivity" />
 
         <service
             android:name=".feature.voice.EvListeningService"

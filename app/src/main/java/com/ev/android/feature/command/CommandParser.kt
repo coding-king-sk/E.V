@@ -14,13 +14,12 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "youtube pe paisa song lagao"          -> PlayMedia("paisa song", YouTube)
  *  "whatsapp kholo"                       -> OpenApp(WhatsApp)
  *  "rehan ko bolo ki main aa raha hoon"   -> SendWhatsApp("rehan", "main aa raha hoon")
- *  "rehan ko sms bhejo ki aa raha hoon"   -> SendSms("rehan", "aa raha hoon")
  *  "rehan ko call lagao"                  -> CallContact("rehan")
- *  "next gaana" / "gaana roko"            -> Media(NEXT) / Media(PAUSE)
- *  "ye gaana kaun sa hai"                 -> IdentifySong
  *  "5 minute ka timer lagao"              -> Timer(300)
  *  "kal subah 8 baje yaad dilana ki dawai" -> Reminder(kal 08:00, "dawai")
- *  "torch on karo"                        -> Device(TORCH_ON)
+ *  "photo lo"                             -> TakePhoto(front = false)
+ *  "instagram pe type karo hello"         -> TypeText("hello", Instagram)
+ *  "torch on karo aur whatsapp kholo"     -> Multi([Device, OpenApp])
  */
 object CommandParser {
 
@@ -70,6 +69,37 @@ object CommandParser {
         "remind me", "remind",
     )
 
+    /**
+     * Photo ke phrases.
+     *
+     * Akela "photo" jaan-boojh ke nahi rakha — warna "photo gallery kholo" bhi
+     * camera chala deta. "selfie" akela theek hai, uska aur koi matlab nahi.
+     */
+    private val photoVerbs = listOf(
+        "photo le lo", "photo lelo", "photo lo", "photo le",
+        "photo khicho", "photo kheecho", "photo khich", "photo kheench",
+        "photo click karo", "photo click", "photo nikalo",
+        "picture lo", "pic lo", "tasveer lo", "snap lo",
+        "selfie le lo", "selfie lo", "selfie le", "selfie khicho", "selfie",
+        "take a photo", "take photo", "click a photo",
+    )
+
+    private val videoVerbs = listOf(
+        "video bana do", "video banao", "video bana",
+        "video record karo", "video record", "record video",
+        "video shoot karo", "video le lo", "video lo",
+        "recording shuru karo", "recording shuru",
+    )
+
+    private val frontCameraWords = listOf(
+        "selfie", "front camera", "front cam", "aage wala camera", "saamne wala camera",
+        "meri photo", "apni photo", "mera video",
+    )
+
+    private val typeVerbs = listOf(
+        "type kar do", "type kardo", "type karo", "type kar", "type",
+    )
+
     /** Only stripped from the START/END of a query so song names stay intact. */
     private val fillerWords = setOf(
         "mujhe", "muje", "please", "plz", "zara", "bhai", "abhi", "to", "na", "yaar",
@@ -102,6 +132,10 @@ object CommandParser {
     private val koRegex = Regex("(^|\\s)ko($|\\s)")
 
     private val kiRegex = Regex("(^|\\s)(ki|that)\\s+")
+
+    /** "torch on karo AUR whatsapp kholo" — yahan se do kaam alag hote hain. */
+    private val joinRegex =
+        Regex("\\s+(?:aur|phir|fir|uske baad|iske baad|baad me|then|and)\\s+")
 
     // ---------------------------------------------------- media vocabulary
 
@@ -179,14 +213,61 @@ object CommandParser {
     private val notificationWords = listOf("notification", "notifications")
     private val settingsWords = listOf("settings", "setting")
 
+    /**
+     * Entry point.
+     *
+     * Pehle dekhta hai ki ek hi vaakya me kai kaam to nahi bole gaye. Agar haan,
+     * aur saare hisse samajh bhi aa gaye, to [EvCommand.Multi] banta hai.
+     */
     fun parse(rawInput: String, installedApps: List<InstalledApp>): EvCommand {
         val raw = rawInput.trim()
         if (raw.isEmpty()) return EvCommand.Unknown(raw)
 
         val normalized = normalize(raw)
 
+        val parts = splitCommands(normalized)
+        if (parts.size > 1) {
+            val commands = parts.map { parseSingle(it, it, installedApps) }
+            // Ek bhi hissa samajh na aaye to todna galat tha — poora vaakya
+            // ek hi command hoga (jaise gaane ke naam me "aur" aa gaya ho).
+            if (commands.none { it is EvCommand.Unknown }) {
+                return EvCommand.Multi(commands)
+            }
+        }
+
+        return parseSingle(normalized, raw, installedApps)
+    }
+
+    /**
+     * "aur / phir / then" pe todo — par sirf tab jab risky na ho.
+     *
+     * Message aur reminder ke body me "aur" bahut aata hai ("bolo ki main aa
+     * raha hoon aur khana laga do"), isliye "ki" wale vaakya kabhi nahi tootte.
+     */
+    private fun splitCommands(text: String): List<String> {
+        if (kiRegex.containsMatchIn(text)) return listOf(text)
+        if (!joinRegex.containsMatchIn(text)) return listOf(text)
+
+        return joinRegex.split(text)
+            .map { it.trim() }
+            .filter { it.length >= 3 }
+    }
+
+    private fun parseSingle(
+        normalized: String,
+        raw: String,
+        installedApps: List<InstalledApp>,
+    ): EvCommand {
+        if (normalized.isEmpty()) return EvCommand.Unknown(raw)
+
         // Device toggles pehle — "torch on karo" ko app-launcher parse na kar de.
         parseDevice(normalized)?.let { return it }
+
+        // "photo lo", "30 second ka video banao"
+        parseCamera(normalized)?.let { return it }
+
+        // "instagram pe type karo hello bhai"
+        parseType(normalized, installedApps)?.let { return it }
 
         // "ye gaana kaun sa hai", "next gaana", "gaana roko", "10 second aage"
         parseMedia(normalized)?.let { return it }
@@ -219,28 +300,90 @@ object CommandParser {
 
         val verb = detectVerb(text)
         val query = cleanQuery(if (verb != null) stripVerb(text, verb) else text)
+        val app = target
 
         return when (verb) {
             Verb.PLAY -> when {
-                query.isEmpty() -> target?.let { EvCommand.OpenApp(it) } ?: EvCommand.Unknown(raw)
-                target == null && resolveApp(query, installedApps) != null ->
+                query.isEmpty() -> app?.let { EvCommand.OpenApp(it) } ?: EvCommand.Unknown(raw)
+                app == null && resolveApp(query, installedApps) != null ->
                     EvCommand.OpenApp(resolveApp(query, installedApps)!!)
-                else -> EvCommand.PlayMedia(query, target ?: youtube)
+                else -> EvCommand.PlayMedia(query, app ?: youtube)
             }
 
             Verb.SEARCH -> when {
-                query.isEmpty() -> target?.let { EvCommand.OpenApp(it) } ?: EvCommand.Unknown(raw)
-                else -> EvCommand.SearchInApp(query, target ?: youtube)
+                query.isEmpty() -> app?.let { EvCommand.OpenApp(it) } ?: EvCommand.Unknown(raw)
+                else -> EvCommand.SearchInApp(query, app ?: youtube)
             }
 
-            Verb.OPEN -> (target ?: resolveApp(query, installedApps))
+            Verb.OPEN -> (app ?: resolveApp(query, installedApps))
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
 
-            null -> (resolveApp(text, installedApps) ?: target)
+            null -> (resolveApp(text, installedApps) ?: app)
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
         }
+    }
+
+    // --------------------------------------------------------------- camera
+
+    /**
+     * "photo lo" / "selfie lo" / "30 second ka video banao"
+     *
+     * Video ka time bola ho to wahi, warna 15 second — itna kaafi hota hai aur
+     * galti se ghanto ki recording nahi chalti.
+     */
+    private fun parseCamera(text: String): EvCommand? {
+        val front = frontCameraWords.any { containsWord(text, it) }
+
+        if (matchPhrase(text, videoVerbs) != null) {
+            val seconds = TimeParser.durationSeconds(text) ?: DEFAULT_VIDEO_SECONDS
+            return EvCommand.RecordVideo(front = front, seconds = seconds)
+        }
+
+        if (matchPhrase(text, photoVerbs) != null) {
+            return EvCommand.TakePhoto(front = front)
+        }
+
+        return null
+    }
+
+    // ----------------------------------------------------------------- type
+
+    /**
+     * "instagram pe type karo hello bhai"
+     *
+     * App ka naam aage se nikalta hai, aur likhne wala text verb ke baad se.
+     * Agar text verb ke pehle bola gaya ho ("hello bhai type karo") to wo bhi
+     * chalta hai.
+     */
+    private fun parseType(text: String, installedApps: List<InstalledApp>): EvCommand? {
+        val verb = matchPhrase(text, typeVerbs) ?: return null
+
+        var work = text
+        var target: AppTarget? = null
+
+        targetSplitRegex.find(work)?.let { match ->
+            val resolved = resolveApp(match.groupValues[1], installedApps)
+            if (resolved != null) {
+                target = resolved
+                work = match.groupValues[3].trim()
+            }
+        }
+
+        val match = phraseRegex(verb).find(work) ?: return null
+
+        val after = work.substring(match.range.last + 1)
+            .trim()
+            .removePrefix("ki ")
+            .removePrefix("that ")
+            .trim()
+        val before = work.substring(0, match.range.first).trim()
+
+        val body = cleanQuery(if (after.isNotEmpty()) after else before)
+        if (body.isBlank()) return null
+
+        return EvCommand.TypeText(text = body, target = target)
     }
 
     // ---------------------------------------------------------------- media
@@ -294,13 +437,6 @@ object CommandParser {
 
     // ------------------------------------------------------------ reminder
 
-    /**
-     * "kal subah 8 baje yaad dilana ki dawai leni hai"
-     *
-     * Body do tarah se milti hai: "ki" ke baad wala hissa (sabse saaf), ya phir
-     * time/verb ke shabd hata ke jo bache. Time na mile to reminder nahi banate
-     * — aisa command AI ke paas chala jata hai, jo behtar guess kar sakta hai.
-     */
     private fun parseReminder(text: String): EvCommand? {
         val verb = matchPhrase(text, reminderVerbs) ?: return null
         val at = TimeParser.reminderMillis(text) ?: return null
@@ -350,8 +486,6 @@ object CommandParser {
 
         // "call" aur "dial" akele bahut aam shabd hain: "call of duty kholo",
         // "dial pad kholo" — inhe call samajh ke dialer khol dena galat hai.
-        // Isliye call tabhi maano jab ya to poora phrase bola gaya ho
-        // ("call lagao", "phone karo"), ya "<naam> ko" wali shape ho.
         val explicitPhrase = verb.contains(" ")
         val hasKo = koRegex.containsMatchIn(text)
         if (!explicitPhrase && !hasKo) return null
@@ -371,13 +505,6 @@ object CommandParser {
 
     // -------------------------------------------------------------- message
 
-    /**
-     * Handles both Hinglish word orders:
-     *   "rehan ko whatsapp pe bolo ki main aa raha hoon"  (body AFTER the verb)
-     *   "whatsapp pe rehan ko good morning bhej do"       (body BEFORE the verb)
-     *
-     * "sms" bola to SMS jata hai (jo sach me auto-send hota hai), warna WhatsApp.
-     */
     private fun parseMessage(text: String): EvCommand? {
         val mentionsWhatsApp = text.contains("whatsapp") || text.contains("whats app")
         val mentionsSms = containsWord(text, "sms") || text.contains("text message")
@@ -422,13 +549,6 @@ object CommandParser {
 
     // --------------------------------------------------------------- device
 
-    /**
-     * Device commands.
-     *
-     * Ambiguous words (volume / brightness) tabhi count hote hain jab saath me
-     * koi up/down/on/off word ho — warna "sound of music lagao" bhi device
-     * command ban jata.
-     */
     private fun parseDevice(text: String): EvCommand.Device? {
         fun has(words: List<String>) = words.any { word -> containsWord(text, word) }
 
@@ -587,4 +707,6 @@ object CommandParser {
         }
         return tokens.joinToString(" ")
     }
+
+    private const val DEFAULT_VIDEO_SECONDS = 15
 }
