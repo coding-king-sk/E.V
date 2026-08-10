@@ -16,6 +16,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.ev.android.feature.ai.AiCommandResolver
 import com.ev.android.feature.ai.AiOutcome
+import com.ev.android.feature.ai.Conversation
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
@@ -35,7 +36,8 @@ import kotlinx.coroutines.launch
  * mic use karne hi nahi deta, aur notification se user ko hamesha pata rehta
  * hai ki mic on hai. Chhupa ke sunne wala kaam E.V nahi karta.
  *
- * Flow: sunna -> "Hey E.V" -> command -> execute -> bol ke jawab -> phir sunna.
+ * Flow: sunna -> "Hey E.V" -> ya to command chalta hai, ya sawaal Groq ko
+ * jaata hai -> jawab bol ke sunaya jaata hai -> phir se sunna.
  */
 class EvListeningService : Service() {
 
@@ -46,7 +48,7 @@ class EvListeningService : Service() {
         const val ACTION_STOP = "com.ev.android.action.STOP_LISTENING"
 
         /** TTS callback kisi wajah se na aaye to bhi mic wapas chalu ho jaye. */
-        private const val SAFETY_RESUME_MS = 15_000L
+        private const val SAFETY_RESUME_MS = 20_000L
 
         @Volatile
         var isRunning: Boolean = false
@@ -92,6 +94,9 @@ class EvListeningService : Service() {
 
         listener?.start()
 
+        // Chhoti si awaz \u2014 isse turant pata chal jata hai ki service zinda hai.
+        say("E.V taiyaar hai")
+
         // App list background me load hoti rehti hai; tab tak bhi commands chalte hain.
         scope.launch {
             apps = InstalledAppsRepository.load(this@EvListeningService)
@@ -118,24 +123,29 @@ class EvListeningService : Service() {
 
     // ------------------------------------------------------------- commands
 
+    /**
+     * Teen seedhiyan: offline parser -> AI se command -> AI se seedha jawab.
+     * Har seedhi tabhi chalti hai jab pichli haar jaye.
+     */
     private fun runCommand(text: String) {
         listener?.pause()
 
         scope.launch {
-            val parsed = CommandParser.parse(text, apps)
+            var command: EvCommand = CommandParser.parse(text, apps)
 
-            val command = if (parsed is EvCommand.Unknown) {
-                when (val outcome = AiCommandResolver.resolve(this@EvListeningService, text, apps)) {
-                    is AiOutcome.Resolved -> outcome.command
-                    is AiOutcome.Failed -> {
-                        say(outcome.reason)
-                        return@launch
-                    }
+            if (command is EvCommand.Unknown) {
+                val outcome = AiCommandResolver.resolve(this@EvListeningService, text, apps)
+                if (outcome is AiOutcome.Resolved) command = outcome.command
+            }
 
-                    AiOutcome.Unavailable -> parsed
-                }
-            } else {
-                parsed
+            if (command is EvCommand.Unknown) {
+                // Command nahi hai \u2014 shayad sawaal hai. Groq se jawab le lo.
+                val reply = Conversation.answer(this@EvListeningService, text)
+                say(
+                    reply ?: "Samajh nahi aaya. Settings me Groq key daal do to " +
+                        "main sawaalon ke jawab bhi de sakta hoon."
+                )
+                return@launch
             }
 
             val result = CommandExecutor.execute(this@EvListeningService, command)

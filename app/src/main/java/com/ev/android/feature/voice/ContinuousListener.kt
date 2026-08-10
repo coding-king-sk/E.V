@@ -16,14 +16,13 @@ import android.speech.SpeechRecognizer
  * ya error ke baad hum use dobara start karte hain. Yahi "hamesha sun raha hai"
  * ka ehsaas deta hai.
  *
- * Do baatein jaanbujh ke aise hain:
+ * **Wake word ka matching sabse nazuk hissa hai.** Pehle version me exact
+ * string match tha aur wo fail ho raha tha, kyunki:
+ *  - Hindi engine "Hey E.V" ko Devanagari me likh deta hai ("\u0939\u0947 \u0908\u0935\u0940")
+ *  - kabhi "hey ivy", "hey evie", "a v", "hey we" jaisa kuch sunta hai
  *
- * - **Wake word zaroori hai.** Bina iske har baat command ban jati. "Hey E.V"
- *   sunne ke baad hi aage ka text command mana jata hai.
- * - **Restart pe delay hai.** Bina delay ke, jab mic dusri app ke paas ho, ye
- *   loop CPU aur battery kha jata hai.
- *
- * Note: recognizer ke saare methods main thread pe hi chalte hain.
+ * Isliye ab exact match ki jagah **token-based** matching hai: pehla shabd
+ * greeting ho to chhod do, agla shabd "E.V" jaisa lage to jaag jao.
  */
 class ContinuousListener(
     private val context: Context,
@@ -39,15 +38,21 @@ class ContinuousListener(
         const val RESTART_DELAY_MS = 400L
         const val BUSY_RETRY_MS = 1_200L
 
-        /**
-         * Speech engine "E.V" ko kai tarah se sunta hai, isliye itne variants.
-         * Sabse lambe pehle match karte hain taki "hey ev" "ev" se pehle lage.
-         */
-        val WAKE_WORDS = listOf(
-            "hey ev", "hey e v", "hey evi", "hey evie", "hey ivy", "hey evy",
-            "hello ev", "hi ev", "hai ev", "ok ev", "okay ev", "he ev", "hey app",
-            "ev", "e v", "evie", "ivy",
-        ).sortedByDescending { it.length }
+        /** "Hey", "ok", "suno" \u2014 inhe chhod ke aage dekhte hain. */
+        val GREETINGS = setOf(
+            "hey", "hay", "hai", "hi", "hello", "he", "ok", "okay", "yo", "arey", "are",
+            "suno", "sun",
+            "\u0939\u0947", "\u0939\u0947\u092f", "\u0939\u093e\u092f", "\u0939\u0948\u0932\u094b", "\u0913\u0915\u0947", "\u0905\u0930\u0947", "\u0938\u0941\u0928\u094b",
+        )
+
+        /** "E.V" ko engine jitne tarah se sun sakta hai. */
+        val NAMES = setOf(
+            "ev", "e", "evi", "evie", "evy", "eevee", "eve", "ivy", "ivi", "avi", "a",
+            "\u0908\u0935\u0940", "\u0908\u0935", "\u0908", "\u0907\u0935\u0940", "\u0907\u0935", "\u090f\u0935", "\u090f\u0935\u0940", "\u0906\u0908\u0935\u0940",
+        )
+
+        /** "e v" alag alag suna gaya ho to doosra token ye hoga. */
+        val NAME_TAILS = setOf("v", "vee", "vi", "bee", "b", "\u0935\u0940", "\u0935")
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -105,7 +110,12 @@ class ContinuousListener(
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
             )
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            // Hinglish ke liye dono \u2014 engine jo behtar samjhe.
+            putExtra(
+                RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES,
+                arrayListOf("hi-IN", "en-IN"),
+            )
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         }
 
@@ -144,6 +154,7 @@ class ContinuousListener(
         }
         awaitingCommand = false
 
+        // Engine kai guesses deta hai; kisi ek me bhi wake word mil jaye to kaafi.
         for (text in heard) {
             val rest = afterWakeWord(text) ?: continue
 
@@ -162,20 +173,33 @@ class ContinuousListener(
         restart(RESTART_DELAY_MS)
     }
 
-    /** Wake word mila to uske baad ka text, warna null. */
+    /**
+     * Wake word mila to uske baad ka text, warna null.
+     * Khali string ka matlab: sirf naam pukara gaya, command abhi baaki hai.
+     */
     private fun afterWakeWord(raw: String): String? {
         val text = raw.lowercase()
-            .replace(Regex("[?!.,;:\"']"), " ")
+            .replace(Regex("[?!.,;:\"'\u0964]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
 
-        for (wake in WAKE_WORDS) {
-            if (text == wake) return ""
-            if (text.startsWith(wake + " ")) {
-                return text.substring(wake.length).trim()
-            }
+        if (text.isEmpty()) return null
+
+        val tokens = text.split(" ")
+        var i = 0
+
+        if (tokens[i] in GREETINGS) {
+            i++
+            if (i >= tokens.size) return null
         }
-        return null
+
+        if (tokens[i] !in NAMES) return null
+        i++
+
+        // "e" + "v" alag alag aaye ho to doosra hissa bhi nigal lo.
+        if (i < tokens.size && tokens[i] in NAME_TAILS) i++
+
+        return tokens.drop(i).joinToString(" ").trim()
     }
 
     // ------------------------------------------------------ RecognitionListener
