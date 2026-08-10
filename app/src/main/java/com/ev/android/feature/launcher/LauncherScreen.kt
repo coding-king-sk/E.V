@@ -90,6 +90,7 @@ import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
 import com.ev.android.feature.tts.VoiceSetup
 import com.ev.android.feature.voice.EvListeningService
+import com.ev.android.feature.voice.WhisperInput
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import com.ev.android.ui.theme.EvBlack
@@ -399,6 +400,50 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         },
     )
 
+    /**
+     * Mic button.
+     *
+     * Whisper tabhi chalta hai jab user ne Settings me khud on kiya ho aur key
+     * ho. Baaki har haal me Google recognizer — wo offline bhi kaam kar jata
+     * hai, isliye default wahi hai.
+     */
+    fun startListening() {
+        if (!EvSettings.whisperStt(context)) {
+            listening = true
+            status = "SUN RAHA HOON\u2026"
+            startVoice()
+            return
+        }
+
+        // Hands-free service mic pakde baithi ho to Whisper ko mic nahi milega.
+        val wasHandsFree = EvListeningService.isRunning
+        if (wasHandsFree) EvListeningService.stop(context)
+
+        listening = true
+        status = "SUN RAHA HOON\u2026 (WHISPER)"
+
+        scope.launch {
+            val result = WhisperInput.listen(context)
+            listening = false
+
+            if (wasHandsFree) {
+                EvListeningService.start(context)
+                handsFree = true
+            }
+
+            result.fold(
+                onSuccess = { spoken ->
+                    input = spoken
+                    runCommand(spoken)
+                },
+                onFailure = { error ->
+                    status = "READY \u2014 BOLO YA LIKHO"
+                    notify(error.message ?: "Whisper se nahi ho paya")
+                },
+            )
+        }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = EvBlack,
@@ -492,11 +537,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                     listening = false
                     status = "READY \u2014 BOLO YA LIKHO"
                 },
-                onMic = {
-                    listening = true
-                    status = "SUN RAHA HOON\u2026"
-                    startVoice()
-                },
+                onMic = { startListening() },
                 modifier = Modifier.padding(bottom = 10.dp),
             )
 
