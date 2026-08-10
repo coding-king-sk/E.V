@@ -24,7 +24,7 @@ object CommandParser {
         "laga do", "lagaa do", "lagado", "laga de", "lagade", "lagao", "lagaao", "laga",
         "baja do", "bajado", "baja de", "bajade", "bajao",
         "chala do", "chalado", "chala de", "chalao",
-        "suna do", "sunado", "sunao",
+        "suna do", "sunado", "sunao", "song",
         "play karo", "play kar", "play kardo", "play",
     )
 
