@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    packageNames pehle sirf WhatsApp tha, kyunki service ka ek hi kaam tha —
+    Send button dabana. Ab "instagram pe type karo" jaise commands ke liye har
+    app ka text box chahiye, isliye ye limit hata di gayi hai.
+
+    Safety code me hai, config me nahi: service tab tak kuch nahi karti jab tak
+    E.V use armWhatsAppAutoSend() ya armTyping() se jagaye na, aur wo window bhi
+    sirf 20-25 second ki hoti hai.
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/accessibility_service_description"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewFocused"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="100"
-    android:packageNames="com.whatsapp,com.whatsapp.w4b" />
+    android:notificationTimeout="100" />

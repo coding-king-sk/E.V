@@ -3,33 +3,45 @@ package com.ev.android.feature.command
 import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.media.MediaAction
 
-/** An app (or web target) that a command should act on. */
+/**
+ * Ek app jise E.V khol sakta hai.
+ *
+ * @param packageName null ho sakta hai agar app phone me mili hi nahi
+ * @param webFallbackUrl app na ho to browser me kya kholna hai
+ */
 data class AppTarget(
     val label: String,
     val packageName: String?,
     val webFallbackUrl: String? = null,
 )
 
+/**
+ * User ne jo bola, use ek saaf-suthre kaam me badal ke rakhna.
+ *
+ * Parser sirf ye banata hai; chalata [CommandExecutor] hai. Isi alag-alag rakhne
+ * ki wajah se parser ke tests bina phone ke, plain JVM pe chal jate hain.
+ */
 sealed interface EvCommand {
+
     /** "whatsapp kholo" */
     data class OpenApp(val target: AppTarget) : EvCommand
 
-    /** "youtube pe paisa song lagao" -> resolve first result + autoplay */
+    /** "youtube pe paisa song lagao" */
     data class PlayMedia(val query: String, val target: AppTarget) : EvCommand
 
-    /** "youtube pe cricket search karo" -> just show results */
+    /** "youtube pe cricket search karo" */
     data class SearchInApp(val query: String, val target: AppTarget) : EvCommand
 
-    /** "rehan ko whatsapp pe bolo ki main aa raha hoon" */
+    /** "rehan ko bolo ki main aa raha hoon" */
     data class SendWhatsApp(val contactName: String?, val message: String) : EvCommand
 
-    /** "rehan ko sms bhejo ki main aa raha hoon" */
+    /** "rehan ko sms bhejo ki aa raha hoon" */
     data class SendSms(val contactName: String, val message: String) : EvCommand
 
     /** "rehan ko call lagao" */
     data class CallContact(val contactName: String) : EvCommand
 
-    /** "next gaana", "gaana roko", "10 second aage" */
+    /** "next gaana", "gaana roko" */
     data class Media(val action: MediaAction) : EvCommand
 
     /** "ye gaana kaun sa hai" */
@@ -41,19 +53,39 @@ sealed interface EvCommand {
     /** "subah 7 baje alarm lagao" */
     data class Alarm(val hour: Int, val minute: Int) : EvCommand
 
-    /**
-     * "kal subah 8 baje yaad dilana ki dawai leni hai"
-     *
-     * Alarm se alag hai: alarm phone ki Clock app me jata hai aur sirf bajta
-     * hai, jabki reminder E.V khud yaad rakhta hai aur waqt aane par bol ke
-     * batata hai ki kya karna tha.
-     *
-     * @param at epoch millis — kab bajana hai
-     */
+    /** "kal subah 8 baje yaad dilana ki dawai leni hai" */
     data class Reminder(val at: Long, val text: String) : EvCommand
 
-    /** "torch on karo", "volume badhao", "screenshot lo" */
+    /** "torch on karo" */
     data class Device(val action: DeviceAction) : EvCommand
 
+    /**
+     * "photo lo" / "selfie lo"
+     *
+     * Camera khulta hai aur photo khud-ba-khud click ho jati hai — user ko
+     * shutter dabane ki zaroorat nahi.
+     */
+    data class TakePhoto(val front: Boolean) : EvCommand
+
+    /** "30 second ka video banao" — recording khud shuru aur khud band. */
+    data class RecordVideo(val front: Boolean, val seconds: Int) : EvCommand
+
+    /**
+     * "instagram pe type karo hello bhai"
+     *
+     * App khulti hai aur uske text box me likh diya jata hai. [target] null ho
+     * to jo app abhi khuli hai usi me type hota hai.
+     */
+    data class TypeText(val text: String, val target: AppTarget?) : EvCommand
+
+    /**
+     * "torch on karo aur whatsapp kholo"
+     *
+     * Ek hi vaakya me kai kaam. Ek ke baad ek chalte hain, beech me thoda gap
+     * rakh ke — warna doosri app pehli ke khulne se pehle hi launch ho jati hai.
+     */
+    data class Multi(val commands: List<EvCommand>) : EvCommand
+
+    /** Kuch samajh nahi aaya — aage AI koshish karega. */
     data class Unknown(val raw: String) : EvCommand
 }
