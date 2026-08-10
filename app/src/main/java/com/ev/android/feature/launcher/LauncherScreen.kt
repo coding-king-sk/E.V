@@ -10,8 +10,11 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,27 +27,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -64,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.ai.AiCommandResolver
@@ -76,13 +76,27 @@ import com.ev.android.feature.command.EvCommand
 import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.history.CommandHistory
 import com.ev.android.feature.history.HistoryEntry
+import com.ev.android.feature.hud.EvOrb
+import com.ev.android.feature.hud.HudActionBar
+import com.ev.android.feature.hud.HudHeader
+import com.ev.android.feature.hud.HudSectionLabel
+import com.ev.android.feature.hud.HudStatusRow
+import com.ev.android.feature.hud.HudTabs
+import com.ev.android.feature.hud.HudTile
 import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.settings.EvSettings
 import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
 import com.ev.android.feature.tts.VoiceSetup
 import com.ev.android.feature.voice.EvListeningService
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
+import com.ev.android.ui.theme.EvBlack
+import com.ev.android.ui.theme.EvGreen
+import com.ev.android.ui.theme.EvOutline
+import com.ev.android.ui.theme.EvSurfaceHigh
+import com.ev.android.ui.theme.EvTextMuted
+import com.ev.android.ui.theme.EvTextPrimary
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,6 +106,13 @@ private data class DeviceTile(val label: String, val emoji: String, val action: 
 
 /** action == null ka matlab "ye gaana kaun sa hai". */
 private data class MediaTile(val label: String, val emoji: String, val action: MediaAction?)
+
+private const val TAB_COMMAND = "COMMAND"
+private const val TAB_APPS = "APPS"
+private const val TAB_TOOLS = "TOOLS"
+private const val TAB_HISTORY = "HISTORY"
+
+private val tabs = listOf(TAB_COMMAND, TAB_APPS, TAB_TOOLS, TAB_HISTORY)
 
 private val deviceTiles = listOf(
     DeviceTile("Torch", "\uD83D\uDD26", DeviceAction.TORCH_TOGGLE),
@@ -116,6 +137,13 @@ private val mediaTiles = listOf(
     MediaTile("Kaun sa gaana?", "\uD83C\uDFA7", null),
 )
 
+/**
+ * E.V ki main screen — HUD look.
+ *
+ * Design jaan-boojh ke "ek cheez pe dhyan" wala hai: beech me bas orb, jo
+ * batata hai E.V so raha hai, sun raha hai ya soch raha hai. Apps, tools aur
+ * history tabs ke peeche hain taaki roz ka istemal shaant lage.
+ */
 @Composable
 fun LauncherScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -124,19 +152,23 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     val keyboard = LocalSoftwareKeyboardController.current
 
     var input by remember { mutableStateOf("") }
+    var tab by remember { mutableStateOf(TAB_COMMAND) }
     var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var loadingApps by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
+    var listening by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
     var accessibilityOn by remember { mutableStateOf(false) }
+    var apiKeySet by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
-    var showAllHistory by remember { mutableStateOf(false) }
     var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
+    var status by remember { mutableStateOf("READY \u2014 BOLO YA LIKHO") }
 
     LaunchedEffect(Unit) {
         CommandHistory.load(context)
         accessibilityOn = AccessibilityHelper.isEnabled(context)
+        apiKeySet = EvSettings.hasApiKey(context)
         handsFree = EvListeningService.isRunning
         installedApps = InstalledAppsRepository.load(context)
         loadingApps = false
@@ -164,8 +196,12 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     fun dispatch(command: EvCommand, spoken: String? = null) {
         scope.launch {
             busy = true
+            status = "SOCH RAHA HOON\u2026"
+
             val result = CommandExecutor.execute(context, command)
+
             busy = false
+            status = result.message.uppercase()
             accessibilityOn = AccessibilityHelper.isEnabled(context)
 
             CommandHistory.add(
@@ -196,6 +232,38 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 Manifest.permission.READ_CONTACTS,
                 Manifest.permission.CALL_PHONE,
             )
+
+            is EvCommand.TakePhoto -> listOf(Manifest.permission.CAMERA)
+
+            is EvCommand.RecordVideo -> listOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.RECORD_AUDIO,
+            )
+
+            // Ek hi vaakya me kai kaam — sabki permissions ek saath maang lo,
+            // warna beech me ruk ke user ko do-teen dialog dekhne padte hain.
+            is EvCommand.Multi -> command.commands.flatMap { inner ->
+                when (inner) {
+                    is EvCommand.SendSms -> listOf(
+                        Manifest.permission.READ_CONTACTS,
+                        Manifest.permission.SEND_SMS,
+                    )
+
+                    is EvCommand.CallContact -> listOf(
+                        Manifest.permission.READ_CONTACTS,
+                        Manifest.permission.CALL_PHONE,
+                    )
+
+                    is EvCommand.SendWhatsApp -> listOf(Manifest.permission.READ_CONTACTS)
+                    is EvCommand.TakePhoto -> listOf(Manifest.permission.CAMERA)
+                    is EvCommand.RecordVideo -> listOf(
+                        Manifest.permission.CAMERA,
+                        Manifest.permission.RECORD_AUDIO,
+                    )
+
+                    else -> emptyList()
+                }
+            }.distinct()
 
             else -> emptyList()
         }
@@ -303,6 +371,8 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
         scope.launch {
             busy = true
+            status = "SOCH RAHA HOON\u2026"
+
             val outcome = AiCommandResolver.resolve(context, text, installedApps)
 
             if (outcome is AiOutcome.Resolved) {
@@ -319,6 +389,8 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 ?: (outcome as? AiOutcome.Failed)?.reason
                 ?: "Samajh nahi aaya. Settings me Groq key daal do to main sawaalon ke jawab bhi de sakta hoon."
 
+            status = message.uppercase()
+
             CommandHistory.add(
                 context = context,
                 spoken = text,
@@ -333,21 +405,17 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
     val startVoice = rememberVoiceCommand(
         onResult = { spoken ->
+            listening = false
             input = spoken
             runCommand(spoken)
         },
-        onError = { notify(it) },
+        onError = {
+            listening = false
+            notify(it)
+        },
     )
 
     val quickShortcuts = remember(input) { AppCatalog.shortcuts.filter { it.matches(input) } }
-    val visibleDeviceTiles = remember(input) {
-        val q = input.trim()
-        if (q.isEmpty()) deviceTiles else deviceTiles.filter { it.label.contains(q, true) }
-    }
-    val visibleMediaTiles = remember(input) {
-        val q = input.trim()
-        if (q.isEmpty()) mediaTiles else mediaTiles.filter { it.label.contains(q, true) }
-    }
     val matchingApps = remember(input, installedApps) {
         val q = input.trim()
         if (q.isEmpty()) installedApps else installedApps.filter { it.label.contains(q, true) }
@@ -355,6 +423,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = EvBlack,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
@@ -363,21 +432,112 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            HeroHeader(
-                handsFree = handsFree,
-                speakReplies = speakReplies,
-                accessibilityOn = accessibilityOn,
-                onToggleHandsFree = { toggleHandsFree() },
-                onToggleSpeak = {
-                    speakReplies = !speakReplies
-                    if (!speakReplies) Speaker.stop()
-                    notify(
-                        if (speakReplies) "Ab E.V bol ke jawab dega"
-                        else "Awaz band \u2014 sirf screen pe dikhega"
-                    )
-                },
+            HudHeader(
+                networkOnline = true,
                 onSettings = { showSettings = true },
-                onMic = { startVoice() },
+                modifier = Modifier.padding(top = 10.dp),
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            HudTabs(tabs = tabs, selected = tab, onSelect = { tab = it })
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            HudStatusRow(
+                micOn = handsFree,
+                coreActive = true,
+                apiKeySet = apiKeySet,
+                onMicClick = { toggleHandsFree() },
+                onApiKeyClick = { showSettings = true },
+            )
+
+            if (busy) {
+                LinearProgressIndicator(
+                    color = EvGreen,
+                    trackColor = EvSurfaceHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                when (tab) {
+                    TAB_COMMAND -> CommandPane(
+                        listening = listening,
+                        busy = busy,
+                        status = status,
+                        accessibilityOn = accessibilityOn,
+                        onEnableAccessibility = {
+                            AccessibilityHelper.openSettings(context)
+                            notify("List me 'E.V auto-send' dhoond ke on kar do")
+                        },
+                    )
+
+                    TAB_APPS -> AppsPane(
+                        loadingApps = loadingApps,
+                        quickShortcuts = quickShortcuts,
+                        matchingApps = matchingApps,
+                        onShortcut = { shortcut ->
+                            val message = when (val result = AppLauncher.launch(context, shortcut)) {
+                                is LaunchResult.Opened -> result.label + " khul raha hai"
+                                is LaunchResult.Fallback -> result.label + ": " + result.reason
+                                is LaunchResult.Failed -> result.label + " open nahi ho paya"
+                            }
+                            notify(message)
+                        },
+                        onApp = { app ->
+                            val opened = AppLauncher.launchPackage(context, app.packageName)
+                            notify(
+                                if (opened) app.label + " khul raha hai"
+                                else app.label + " open nahi ho paya"
+                            )
+                        },
+                    )
+
+                    TAB_TOOLS -> ToolsPane(
+                        onDevice = { action -> dispatch(EvCommand.Device(action)) },
+                        onMedia = { action ->
+                            dispatch(
+                                if (action == null) EvCommand.IdentifySong
+                                else EvCommand.Media(action)
+                            )
+                        },
+                        onCamera = { front -> handle(EvCommand.TakePhoto(front = front)) },
+                        onVideo = { handle(EvCommand.RecordVideo(front = false, seconds = 15)) },
+                    )
+
+                    else -> HistoryPane(
+                        entries = CommandHistory.entries,
+                        onRepeat = { entry -> runCommand(entry.spoken) },
+                        onClear = {
+                            CommandHistory.clear(context)
+                            notify("History saaf kar di")
+                        },
+                    )
+                }
+            }
+
+            HudActionBar(
+                busy = busy,
+                listening = listening,
+                onCamera = { handle(EvCommand.TakePhoto(front = false)) },
+                onStop = {
+                    Speaker.stop()
+                    listening = false
+                    status = "READY \u2014 BOLO YA LIKHO"
+                },
+                onMic = {
+                    listening = true
+                    status = "SUN RAHA HOON\u2026"
+                    startVoice()
+                },
+                modifier = Modifier.padding(bottom = 10.dp),
             )
 
             OutlinedTextField(
@@ -385,280 +545,243 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 onValueChange = { input = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
+                    .padding(bottom = 12.dp),
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
-                label = { Text("Bolo ya likho") },
-                placeholder = { Text("YouTube pe paisa song lagao") },
+                placeholder = {
+                    Text("type a command\u2026", color = EvTextMuted, fontSize = 15.sp)
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = EvTextPrimary,
+                    unfocusedTextColor = EvTextPrimary,
+                    focusedBorderColor = EvGreen,
+                    unfocusedBorderColor = EvOutline,
+                    cursorColor = EvGreen,
+                    focusedContainerColor = EvSurfaceHigh,
+                    unfocusedContainerColor = EvSurfaceHigh,
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { runCommand(input) }),
                 trailingIcon = {
-                    Row {
-                        IconButton(onClick = { startVoice() }) {
-                            Text("\uD83C\uDFA4", style = MaterialTheme.typography.titleLarge)
-                        }
-                        IconButton(
-                            onClick = { runCommand(input) },
-                            enabled = input.isNotBlank() && !busy,
-                        ) {
-                            Text("\u25B6", style = MaterialTheme.typography.titleLarge)
-                        }
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = input.isNotBlank() && !busy) {
+                                runCommand(input)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "\u2192",
+                            color = if (input.isNotBlank()) EvGreen else EvTextMuted,
+                            fontSize = 22.sp,
+                        )
                     }
                 },
             )
-
-            if (busy) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                )
-            }
-
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 104.dp),
-                contentPadding = PaddingValues(vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (!accessibilityOn) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        AccessibilityBanner(
-                            onEnable = {
-                                AccessibilityHelper.openSettings(context)
-                                notify("List me 'E.V auto-send' dhoond ke on kar do")
-                            },
-                        )
-                    }
-                }
-
-                if (CommandHistory.entries.isNotEmpty() && input.isBlank()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        HistoryCard(
-                            entries = CommandHistory.entries,
-                            expanded = showAllHistory,
-                            onToggleExpand = { showAllHistory = !showAllHistory },
-                            onRepeat = { entry -> runCommand(entry.spoken) },
-                            onClear = {
-                                CommandHistory.clear(context)
-                                notify("History saaf kar di")
-                            },
-                        )
-                    }
-                }
-
-                if (visibleMediaTiles.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        SectionHeader("Jo abhi chal raha hai")
-                    }
-                    items(visibleMediaTiles, key = { "media_" + it.label }) { tile ->
-                        TileCard(
-                            label = tile.label,
-                            onClick = {
-                                val action = tile.action
-                                dispatch(
-                                    if (action == null) EvCommand.IdentifySong
-                                    else EvCommand.Media(action)
-                                )
-                            },
-                        ) {
-                            Text(tile.emoji, style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
-                }
-
-                if (visibleDeviceTiles.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        SectionHeader("Device controls")
-                    }
-                    items(visibleDeviceTiles, key = { "device_" + it.action.name }) { tile ->
-                        TileCard(
-                            label = tile.label,
-                            onClick = { dispatch(EvCommand.Device(tile.action)) },
-                        ) {
-                            Text(tile.emoji, style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
-                }
-
-                if (quickShortcuts.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        SectionHeader("Quick actions")
-                    }
-                    items(quickShortcuts, key = { "quick_" + it.id }) { shortcut ->
-                        TileCard(
-                            label = shortcut.label,
-                            onClick = {
-                                val message = when (val result = AppLauncher.launch(context, shortcut)) {
-                                    is LaunchResult.Opened -> result.label + " khul raha hai"
-                                    is LaunchResult.Fallback -> result.label + ": " + result.reason
-                                    is LaunchResult.Failed -> result.label + " open nahi ho paya"
-                                }
-                                notify(message)
-                            },
-                        ) {
-                            Text(shortcut.emoji, style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
-                }
-
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SectionHeader(
-                        if (loadingApps) "Phone ke apps load ho rahe hain\u2026"
-                        else "Phone ke apps (" + matchingApps.size + ")"
-                    )
-                }
-
-                items(matchingApps, key = { "app_" + it.packageName }) { app ->
-                    TileCard(
-                        label = app.label,
-                        onClick = {
-                            val opened = AppLauncher.launchPackage(context, app.packageName)
-                            notify(
-                                if (opened) app.label + " khul raha hai"
-                                else app.label + " open nahi ho paya"
-                            )
-                        },
-                    ) {
-                        val icon = app.icon
-                        if (icon != null) {
-                            Image(
-                                bitmap = icon,
-                                contentDescription = app.label,
-                                modifier = Modifier.size(40.dp),
-                            )
-                        } else {
-                            Text("\uD83D\uDCF1", style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
-                }
-
-                if (!loadingApps && matchingApps.isEmpty() && quickShortcuts.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            text = "Kuch nahi mila. Mic dabake bol ke bhi try kar sakte ho.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 24.dp),
-                        )
-                    }
-                }
-            }
         }
     }
 
     if (showSettings) {
         SettingsDialog(
-            onDismiss = { showSettings = false },
-            onSaved = { notify(it) },
+            onDismiss = {
+                showSettings = false
+                apiKeySet = EvSettings.hasApiKey(context)
+            },
+            onSaved = {
+                apiKeySet = EvSettings.hasApiKey(context)
+                notify(it)
+            },
         )
     }
 }
 
-/**
- * Upar wala bada card.
- *
- * Ek nazar me pata chal jata hai ki E.V sun raha hai ya nahi, awaz on hai ya
- * nahi, aur accessibility chalu hai ya nahi — pehle ye sab chhote icons me
- * chhupa hua tha.
- */
+/** Beech wala shaant sa screen — sirf orb aur ek line status. */
 @Composable
-private fun HeroHeader(
-    handsFree: Boolean,
-    speakReplies: Boolean,
+private fun CommandPane(
+    listening: Boolean,
+    busy: Boolean,
+    status: String,
     accessibilityOn: Boolean,
-    onToggleHandsFree: () -> Unit,
-    onToggleSpeak: () -> Unit,
-    onSettings: () -> Unit,
-    onMic: () -> Unit,
+    onEnableAccessibility: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = MaterialTheme.colorScheme
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surface),
+    Column(
+        modifier = modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Box(
-            modifier = Modifier.background(
-                Brush.linearGradient(
-                    listOf(colors.primaryContainer, colors.tertiaryContainer),
+        EvOrb(
+            listening = listening,
+            busy = busy,
+            dimmed = !listening && !busy,
+            modifier = Modifier.size(230.dp),
+        )
+
+        Text(
+            text = status,
+            color = EvGreen,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.5.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 26.dp, start = 12.dp, end = 12.dp),
+        )
+
+        Text(
+            text = "ENGINE LOCAL",
+            color = EvTextMuted,
+            fontSize = 12.sp,
+            letterSpacing = 2.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+
+        if (!accessibilityOn) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 22.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(BorderStroke(1.dp, EvOutline), RoundedCornerShape(14.dp))
+                    .background(EvSurfaceHigh)
+                    .clickable(onClick = onEnableAccessibility)
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = "AUTO-SEND / TYPING OFF \u2014 ON KARO",
+                    color = EvTextMuted,
+                    fontSize = 12.sp,
+                    letterSpacing = 1.sp,
                 )
-            )
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "E.V",
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.onPrimaryContainer,
-                        )
-                        Text(
-                            text = if (handsFree) "Sun raha hoon \u2014 bas \"Hey E.V\" bolo"
-                            else "So raha hoon \u2014 mic dabao ya hands-free on karo",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.onPrimaryContainer,
-                        )
-                    }
-
-                    IconButton(onClick = onSettings) {
-                        Text("\u2699", style = MaterialTheme.typography.titleLarge)
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.padding(top = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Card(
-                        onClick = onMic,
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = colors.primary),
-                    ) {
-                        Text(
-                            text = "\uD83C\uDFA4  Bolo",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = colors.onPrimary,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    AssistChip(
-                        onClick = onToggleHandsFree,
-                        label = { Text(if (handsFree) "Hands-free on" else "Hands-free off") },
-                        leadingIcon = { Text(if (handsFree) "\uD83D\uDC42" else "\uD83D\uDCA4") },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = colors.surface,
-                        ),
-                    )
-                }
-
-                Row(modifier = Modifier.padding(top = 8.dp)) {
-                    AssistChip(
-                        onClick = onToggleSpeak,
-                        label = { Text(if (speakReplies) "Awaz on" else "Awaz off") },
-                        leadingIcon = { Text(if (speakReplies) "\uD83D\uDD0A" else "\uD83D\uDD07") },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = colors.surface,
-                        ),
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    AssistChip(
-                        onClick = {},
-                        enabled = false,
-                        label = { Text(if (accessibilityOn) "Auto-send on" else "Auto-send off") },
-                        leadingIcon = { Text(if (accessibilityOn) "\u2705" else "\u267F") },
-                    )
-                }
             }
+        }
+    }
+}
+
+@Composable
+private fun AppsPane(
+    loadingApps: Boolean,
+    quickShortcuts: List<AppShortcut>,
+    matchingApps: List<InstalledApp>,
+    onShortcut: (AppShortcut) -> Unit,
+    onApp: (InstalledApp) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 100.dp),
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (quickShortcuts.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                HudSectionLabel("// quick")
+            }
+            items(quickShortcuts, key = { "quick_" + it.id }) { shortcut ->
+                HudTile(
+                    label = shortcut.label,
+                    onClick = { onShortcut(shortcut) },
+                    modifier = Modifier.height(98.dp),
+                    icon = { Text(shortcut.emoji, fontSize = 26.sp) },
+                )
+            }
+        }
+
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            HudSectionLabel(
+                if (loadingApps) "// apps load ho rahe hain"
+                else "// apps (" + matchingApps.size + ")"
+            )
+        }
+
+        items(matchingApps, key = { "app_" + it.packageName }) { app ->
+            HudTile(
+                label = app.label,
+                onClick = { onApp(app) },
+                modifier = Modifier.height(98.dp),
+                icon = {
+                    val icon = app.icon
+                    if (icon != null) {
+                        Image(
+                            bitmap = icon,
+                            contentDescription = app.label,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else {
+                        Text("\uD83D\uDCF1", fontSize = 26.sp)
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolsPane(
+    onDevice: (DeviceAction) -> Unit,
+    onMedia: (MediaAction?) -> Unit,
+    onCamera: (Boolean) -> Unit,
+    onVideo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 100.dp),
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) { HudSectionLabel("// camera") }
+
+        item {
+            HudTile(
+                label = "Photo",
+                onClick = { onCamera(false) },
+                modifier = Modifier.height(98.dp),
+                icon = { Text("\uD83D\uDCF7", fontSize = 26.sp) },
+            )
+        }
+        item {
+            HudTile(
+                label = "Selfie",
+                onClick = { onCamera(true) },
+                modifier = Modifier.height(98.dp),
+                icon = { Text("\uD83E\uDD33", fontSize = 26.sp) },
+            )
+        }
+        item {
+            HudTile(
+                label = "Video",
+                onClick = onVideo,
+                modifier = Modifier.height(98.dp),
+                icon = { Text("\uD83C\uDFA5", fontSize = 26.sp) },
+            )
+        }
+
+        item(span = { GridItemSpan(maxLineSpan) }) { HudSectionLabel("// jo abhi chal raha hai") }
+
+        items(mediaTiles, key = { "media_" + it.label }) { tile ->
+            HudTile(
+                label = tile.label,
+                onClick = { onMedia(tile.action) },
+                modifier = Modifier.height(98.dp),
+                icon = { Text(tile.emoji, fontSize = 26.sp) },
+            )
+        }
+
+        item(span = { GridItemSpan(maxLineSpan) }) { HudSectionLabel("// device") }
+
+        items(deviceTiles, key = { "device_" + it.action.name }) { tile ->
+            HudTile(
+                label = tile.label,
+                onClick = { onDevice(tile.action) },
+                modifier = Modifier.height(98.dp),
+                icon = { Text(tile.emoji, fontSize = 26.sp) },
+            )
         }
     }
 }
@@ -670,149 +793,95 @@ private fun HeroHeader(
  * hai, to galti kahan hui ye turant pata chal jata hai.
  */
 @Composable
-private fun HistoryCard(
+private fun HistoryPane(
     entries: List<HistoryEntry>,
-    expanded: Boolean,
-    onToggleExpand: () -> Unit,
     onRepeat: (HistoryEntry) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val visible = if (expanded) entries.take(20) else entries.take(3)
     val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
+    if (entries.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "ABHI KOI COMMAND NAHI",
+                color = EvTextMuted,
+                fontSize = 13.sp,
+                letterSpacing = 1.5.sp,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 12.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        item {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                HudSectionLabel("// history", modifier = Modifier.weight(1f))
                 Text(
-                    text = "\uD83D\uDD52 Pichle commands",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f),
+                    text = "SAAF KARO",
+                    color = EvTextMuted,
+                    fontSize = 12.sp,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onClear)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                 )
-                TextButton(onClick = onClear) { Text("Saaf karo") }
             }
+        }
 
-            visible.forEachIndexed { index, entry ->
-                if (index > 0) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                }
-
-                Column(modifier = Modifier.padding(top = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = entry.spoken,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = formatter.format(Date(entry.at)),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        TextButton(onClick = { onRepeat(entry) }) { Text("Phir se") }
-                    }
-
+        items(entries.take(30), key = { it.at.toString() + it.spoken }) { entry ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(EvSurfaceHigh)
+                    .border(BorderStroke(1.dp, EvOutline), RoundedCornerShape(14.dp))
+                    .clickable { onRepeat(entry) }
+                    .padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "\u2192 " + entry.understood,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-
-                    Text(
-                        text = entry.reply,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
+                        text = entry.spoken,
+                        color = EvTextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = formatter.format(Date(entry.at)),
+                        color = EvTextMuted,
+                        fontSize = 11.sp,
                     )
                 }
+
+                Text(
+                    text = "\u2192 " + entry.understood,
+                    color = EvGreen,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+
+                HorizontalDivider(
+                    color = EvOutline,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+
+                Text(
+                    text = entry.reply,
+                    color = EvTextMuted,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-
-            if (entries.size > 3) {
-                TextButton(onClick = onToggleExpand) {
-                    Text(if (expanded) "Kam dikhao" else "Sab dikhao (" + entries.size + ")")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AccessibilityBanner(onEnable: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "\u267F Auto-send band hai",
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                text = "WhatsApp ka Send button E.V khud daba sake, iske liye ek baar " +
-                    "Accessibility me 'E.V auto-send' on kar do. Device ke screenshot, " +
-                    "lock aur back/home buttons bhi isi se chalte hain.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            TextButton(onClick = onEnable, modifier = Modifier.padding(top = 4.dp)) {
-                Text("Enable karo")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionHeader(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = modifier.padding(top = 8.dp, bottom = 4.dp),
-    )
-}
-
-@Composable
-private fun TileCard(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: @Composable () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        modifier = modifier.height(104.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            icon()
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 8.dp),
-            )
         }
     }
 }
