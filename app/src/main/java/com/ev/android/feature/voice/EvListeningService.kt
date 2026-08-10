@@ -24,6 +24,7 @@ import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
+import com.ev.android.feature.history.CommandHistory
 import com.ev.android.feature.tts.Speaker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -99,6 +100,7 @@ class EvListeningService : Service() {
             return
         }
 
+        CommandHistory.load(this)
         Speaker.init(this)
 
         listener = ContinuousListener(
@@ -166,14 +168,30 @@ class EvListeningService : Service() {
             if (command is EvCommand.Unknown) {
                 // Command nahi hai — shayad sawaal hai. Groq se jawab le lo.
                 val reply = Conversation.answer(this@EvListeningService, text)
-                say(
-                    reply ?: "Samajh nahi aaya. Settings me Groq key daal do to " +
-                        "main sawaalon ke jawab bhi de sakta hoon."
+                val message = reply
+                    ?: "Samajh nahi aaya. Settings me Groq key daal do to " +
+                    "main sawaalon ke jawab bhi de sakta hoon."
+
+                CommandHistory.add(
+                    context = this@EvListeningService,
+                    spoken = text,
+                    understood = if (reply != null) "Sawaal (AI)" else "Samajh nahi aaya",
+                    reply = message,
                 )
+
+                say(message)
                 return@launch
             }
 
             val result = CommandExecutor.execute(this@EvListeningService, command)
+
+            CommandHistory.add(
+                context = this@EvListeningService,
+                spoken = text,
+                understood = CommandHistory.describe(command),
+                reply = result.message,
+            )
+
             say(result.message)
         }
     }
