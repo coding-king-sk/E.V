@@ -7,11 +7,17 @@ import android.net.Uri
 import android.provider.MediaStore
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.accessibility.EvAccessibilityService
+import com.ev.android.feature.calling.Caller
 import com.ev.android.feature.contacts.ContactsRepository
 import com.ev.android.feature.contacts.PhoneNumbers
+import com.ev.android.feature.daily.DailyTasks
 import com.ev.android.feature.device.DeviceControls
 import com.ev.android.feature.launcher.AppLauncher
+import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.media.MediaControls
+import com.ev.android.feature.media.SongIdentifier
 import com.ev.android.feature.media.YouTubeResolver
+import com.ev.android.feature.messaging.SmsSender
 import java.net.URLEncoder
 
 sealed interface CommandResult {
@@ -30,11 +36,42 @@ object CommandExecutor {
         is EvCommand.PlayMedia -> playMedia(context, command.query, command.target)
         is EvCommand.SearchInApp -> searchInApp(context, command.query, command.target)
         is EvCommand.SendWhatsApp -> sendWhatsApp(context, command.contactName, command.message)
+        is EvCommand.SendSms -> sendSms(context, command.contactName, command.message)
+        is EvCommand.CallContact -> callContact(context, command.contactName)
+
+        is EvCommand.Media ->
+            if (MediaControls.perform(context, command.action)) {
+                CommandResult.Success(mediaMessage(command.action))
+            } else {
+                CommandResult.Failure("Abhi koi app media play nahi kar rahi")
+            }
+
+        is EvCommand.IdentifySong -> CommandResult.Success(SongIdentifier.identify(context))
+
+        is EvCommand.Timer ->
+            if (DailyTasks.setTimer(context, command.seconds, command.label)) {
+                CommandResult.Success(
+                    DailyTasks.formatDuration(command.seconds) + " ka timer laga diya",
+                )
+            } else {
+                CommandResult.Failure("Timer set nahi ho paya \u2014 koi Clock app nahi mili")
+            }
+
+        is EvCommand.Alarm ->
+            if (DailyTasks.setAlarm(context, command.hour, command.minute, null)) {
+                CommandResult.Success(
+                    DailyTasks.formatTime(command.hour, command.minute) + " ka alarm laga diya",
+                )
+            } else {
+                CommandResult.Failure("Alarm set nahi ho paya \u2014 koi Clock app nahi mili")
+            }
+
         is EvCommand.Device -> {
             val result = DeviceControls.run(context, command.action)
             if (result.ok) CommandResult.Success(result.message)
             else CommandResult.Failure(result.message)
         }
+
         is EvCommand.Unknown -> CommandResult.Failure(
             "Samajh nahi aaya: \"${command.raw}\". Try: \"YouTube pe paisa song lagao\""
         )
@@ -119,18 +156,8 @@ object CommandExecutor {
             return openApp(context, CommandParser.whatsapp)
         }
 
-        val number = when {
-            PhoneNumbers.looksLikeNumber(contactName) -> PhoneNumbers.normalize(contactName)
-            else -> ContactsRepository.findByName(context, contactName)?.phone
-        }
-
-        if (number == null) {
-            return if (!ContactsRepository.hasPermission(context)) {
-                CommandResult.Failure("Contacts ki permission chahiye naam se message bhejne ke liye")
-            } else {
-                CommandResult.Failure("\"$contactName\" naam ka contact nahi mila")
-            }
-        }
+        val number = resolveNumber(context, contactName)
+            ?: return contactFailure(context, contactName)
 
         val autoSend = AccessibilityHelper.isEnabled(context)
         if (autoSend) {
@@ -160,6 +187,68 @@ object CommandExecutor {
 
         EvAccessibilityService.cancelAutoSend()
         return CommandResult.Failure("WhatsApp open nahi ho paya")
+    }
+
+    /**
+     * SMS \u2014 yahan Android sach me auto-send karne deta hai, isliye WhatsApp
+     * wali accessibility trick ki zaroorat nahi.
+     */
+    private suspend fun sendSms(
+        context: Context,
+        contactName: String,
+        message: String,
+    ): CommandResult {
+        val number = resolveNumber(context, contactName)
+            ?: return contactFailure(context, contactName)
+
+        if (SmsSender.send(context, number, message)) {
+            return CommandResult.Success("$contactName ko SMS bhej diya")
+        }
+
+        return if (SmsSender.openDraft(context, number, message)) {
+            CommandResult.Success("$contactName ka SMS type kar diya \u2014 send dabao")
+        } else {
+            CommandResult.Failure("SMS bhej nahi paya")
+        }
+    }
+
+    private suspend fun callContact(context: Context, contactName: String): CommandResult {
+        val number = resolveNumber(context, contactName)
+            ?: return contactFailure(context, contactName)
+
+        if (!Caller.call(context, number)) {
+            return CommandResult.Failure("Call nahi lag payi")
+        }
+
+        return if (Caller.dialedDirectly(context)) {
+            CommandResult.Success("$contactName ko call lag rahi hai")
+        } else {
+            CommandResult.Success("$contactName ka number dialer me hai \u2014 call button dabao")
+        }
+    }
+
+    /** Naam ya seedha number \u2014 dono se phone number nikalta hai. */
+    private suspend fun resolveNumber(context: Context, contactName: String): String? = when {
+        PhoneNumbers.looksLikeNumber(contactName) -> PhoneNumbers.normalize(contactName)
+        else -> ContactsRepository.findByName(context, contactName)?.phone
+    }
+
+    private fun contactFailure(context: Context, contactName: String): CommandResult.Failure =
+        if (!ContactsRepository.hasPermission(context)) {
+            CommandResult.Failure("Contacts ki permission chahiye naam se contact dhoondne ke liye")
+        } else {
+            CommandResult.Failure("\"$contactName\" naam ka contact nahi mila")
+        }
+
+    private fun mediaMessage(action: MediaAction): String = when (action) {
+        MediaAction.NEXT -> "Agla gaana"
+        MediaAction.PREVIOUS -> "Pichla gaana"
+        MediaAction.PLAY_PAUSE -> "Play/pause kiya"
+        MediaAction.PAUSE -> "Rok diya"
+        MediaAction.PLAY -> "Phir se chalu"
+        MediaAction.FORWARD -> "Aage badha diya"
+        MediaAction.REWIND -> "Peeche kar diya"
+        MediaAction.STOP -> "Band kar diya"
     }
 
     private fun openYouTubeVideo(context: Context, videoId: String): Boolean {
