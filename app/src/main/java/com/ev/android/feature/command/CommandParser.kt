@@ -3,6 +3,7 @@ package com.ev.android.feature.command
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.launcher.AppCatalog
+import com.ev.android.feature.media.MediaAction
 
 private enum class Verb { PLAY, OPEN, SEARCH }
 
@@ -13,8 +14,12 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "youtube pe paisa song lagao"          -> PlayMedia("paisa song", YouTube)
  *  "whatsapp kholo"                       -> OpenApp(WhatsApp)
  *  "rehan ko bolo ki main aa raha hoon"   -> SendWhatsApp("rehan", "main aa raha hoon")
+ *  "rehan ko sms bhejo ki aa raha hoon"   -> SendSms("rehan", "aa raha hoon")
+ *  "rehan ko call lagao"                  -> CallContact("rehan")
+ *  "next gaana" / "gaana roko"            -> Media(NEXT) / Media(PAUSE)
+ *  "ye gaana kaun sa hai"                 -> IdentifySong
+ *  "5 minute ka timer lagao"              -> Timer(300)
  *  "torch on karo"                        -> Device(TORCH_ON)
- *  "volume badhao"                        -> Device(VOLUME_UP)
  */
 object CommandParser {
 
@@ -43,11 +48,18 @@ object CommandParser {
     private val messageVerbs = listOf(
         "message bhej do", "message bhejo", "message bhejna", "message karo", "message kar",
         "msg bhej do", "msg bhejo", "msg karo",
+        "sms bhej do", "sms bhejo", "sms karo", "sms kar do",
         "text kar do", "text karo",
         "bhej do", "bhejo", "bhejna", "bhej",
         "likh do", "likho", "likh",
         "keh do", "kehna", "kaho",
         "bol do", "bolo", "bol",
+    )
+
+    private val callVerbs = listOf(
+        "call laga do", "call lagao", "call kar do", "call kardo", "call karo",
+        "phone laga do", "phone lagao", "phone karo",
+        "dial karo", "dial", "call",
     )
 
     /** Only stripped from the START/END of a query so song names stay intact. */
@@ -58,13 +70,66 @@ object CommandParser {
     private val connectors =
         setOf("pe", "par", "pr", "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke")
 
-    private val messageNoiseWords = setOf("message", "msg", "text", "whatsapp", "wa")
+    private val messageNoiseWords = setOf("message", "msg", "text", "sms", "whatsapp", "wa")
+
+    private val callNoiseWords =
+        setOf("call", "phone", "dial", "lagao", "laga", "karo", "kar", "kardo", "do", "milao")
 
     private val targetSplitRegex =
         Regex("^(.{2,40}?)\\s+(pe|par|pr|me|mein|main|on|in)\\s+(.+)$")
 
     private val whatsappPrefixRegex =
         Regex("^(whatsapp|whats app|wa)\\s+(pe|par|pr|me|mein|main|on)\\s+")
+
+    private val koRegex = Regex("(^|\\s)ko($|\\s)")
+
+    // ---------------------------------------------------- media vocabulary
+
+    private val nextWords = listOf(
+        "next gaana", "next gana", "next song", "next track", "next video", "next",
+        "agla gaana", "agla gana", "agla song", "aage wala gaana",
+        "gaana badlo", "gana badlo", "song badlo", "gaana change karo",
+    )
+
+    private val prevWords = listOf(
+        "pichla gaana", "pichla gana", "pichla song", "pehle wala gaana",
+        "previous song", "previous track", "previous", "last song",
+    )
+
+    private val pauseWords = listOf(
+        "gaana roko", "gana roko", "song roko", "music roko", "video roko",
+        "gaana rok do", "gana rok do", "rok do", "roko",
+        "gaana band karo", "gana band karo", "song band karo", "music band karo",
+        "pause karo", "pause kar do", "pause",
+    )
+
+    private val resumeWords = listOf(
+        "gaana chalu karo", "gana chalu karo", "music chalu karo", "song chalu karo",
+        "resume karo", "resume", "phir se chalao",
+    )
+
+    private val forwardWords = listOf(
+        "aage badhao", "aage badha do", "aage karo", "aage kar do", "aage",
+        "fast forward", "forward karo", "forward", "skip karo",
+    )
+
+    private val rewindWords = listOf(
+        "peeche karo", "peeche kar do", "piche karo", "peeche", "piche",
+        "rewind karo", "rewind", "replay",
+    )
+
+    private val whichWords = listOf("kaun sa", "kaunsa", "kaun si", "konsa", "kon sa", "which")
+
+    private val identifyWords = listOf(
+        "gaana pehchano", "gana pehchano", "song pehchano", "gaana pehchan",
+        "identify song", "identify gaana", "shazam",
+    )
+
+    /** Words that may harmlessly hang around a media command. */
+    private val mediaSubjectWords = setOf(
+        "gaana", "gana", "gane", "song", "songs", "music", "track", "video",
+        "ye", "yeh", "ise", "isko", "is", "wala",
+    )
 
     // ---------------------------------------------------- device vocabulary
 
@@ -103,8 +168,17 @@ object CommandParser {
         // Device toggles pehle \u2014 "torch on karo" ko app-launcher parse na kar de.
         parseDevice(normalized)?.let { return it }
 
-        // WhatsApp messaging ki shape ("<naam> ko ... bhejo") bahut distinctive hai.
-        parseWhatsAppMessage(normalized)?.let { return it }
+        // "ye gaana kaun sa hai", "next gaana", "gaana roko", "10 second aage"
+        parseMedia(normalized)?.let { return it }
+
+        // "5 minute ka timer", "subah 7 baje alarm"
+        parseTimerOrAlarm(normalized)?.let { return it }
+
+        // "rehan ko call lagao"
+        parseCall(normalized)?.let { return it }
+
+        // Messaging ki shape ("<naam> ko ... bhejo") bahut distinctive hai.
+        parseMessage(normalized)?.let { return it }
 
         var text = normalized
         var target: AppTarget? = null
@@ -143,6 +217,142 @@ object CommandParser {
                 ?: EvCommand.Unknown(raw)
         }
     }
+
+    // ---------------------------------------------------------------- media
+
+    /**
+     * Media commands.
+     *
+     * next/pause/resume tabhi maante hain jab command me aur kuch bacha na ho.
+     * Warna "paisa gaana chalu karo" bhi resume ban jata, jabki wahan user ek
+     * naya gaana chalwana chahta hai.
+     */
+    private fun parseMedia(text: String): EvCommand? {
+        if (isSongIdentify(text)) return EvCommand.IdentifySong
+
+        matchPhrase(text, forwardWords)?.let { return EvCommand.Media(MediaAction.FORWARD) }
+        matchPhrase(text, rewindWords)?.let { return EvCommand.Media(MediaAction.REWIND) }
+
+        matchPhrase(text, nextWords)?.let {
+            if (onlySubjectLeft(text, it)) return EvCommand.Media(MediaAction.NEXT)
+        }
+        matchPhrase(text, prevWords)?.let {
+            if (onlySubjectLeft(text, it)) return EvCommand.Media(MediaAction.PREVIOUS)
+        }
+        matchPhrase(text, pauseWords)?.let {
+            if (onlySubjectLeft(text, it)) return EvCommand.Media(MediaAction.PAUSE)
+        }
+        matchPhrase(text, resumeWords)?.let {
+            if (onlySubjectLeft(text, it)) return EvCommand.Media(MediaAction.PLAY)
+        }
+
+        return null
+    }
+
+    private fun isSongIdentify(text: String): Boolean {
+        if (identifyWords.any { containsWord(text, it) }) return true
+
+        val hasSubject = listOf("gaana", "gana", "song", "music", "track")
+            .any { containsWord(text, it) }
+        val asksWhich = whichWords.any { containsWord(text, it) }
+
+        return hasSubject && asksWhich
+    }
+
+    private fun onlySubjectLeft(text: String, phrase: String): Boolean {
+        val rest = text.replace(phraseRegex(phrase), " ")
+        return normalize(rest)
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .all { it in mediaSubjectWords || it in fillerWords || it in connectors }
+    }
+
+    // ------------------------------------------------------- timer / alarm
+
+    private fun parseTimerOrAlarm(text: String): EvCommand? {
+        if (containsWord(text, "alarm")) {
+            val time = TimeParser.clockTime(text) ?: return null
+            return EvCommand.Alarm(time.first, time.second)
+        }
+
+        if (containsWord(text, "timer")) {
+            val seconds = TimeParser.durationSeconds(text) ?: return null
+            return EvCommand.Timer(seconds, null)
+        }
+
+        return null
+    }
+
+    // ----------------------------------------------------------------- call
+
+    private fun parseCall(text: String): EvCommand? {
+        val verb = matchPhrase(text, callVerbs) ?: return null
+
+        val withoutVerb = text.replace(phraseRegex(verb), " ").replace(koRegex, " ")
+        val name = normalize(withoutVerb)
+            .split(" ")
+            .filter {
+                it.isNotBlank() && it !in callNoiseWords &&
+                    it !in connectors && it !in fillerWords
+            }
+            .joinToString(" ")
+
+        if (name.isEmpty()) return null
+        return EvCommand.CallContact(name)
+    }
+
+    // -------------------------------------------------------------- message
+
+    /**
+     * Handles both Hinglish word orders:
+     *   "rehan ko whatsapp pe bolo ki main aa raha hoon"  (body AFTER the verb)
+     *   "whatsapp pe rehan ko good morning bhej do"       (body BEFORE the verb)
+     *
+     * "sms" bola to SMS jata hai (jo sach me auto-send hota hai), warna WhatsApp.
+     */
+    private fun parseMessage(text: String): EvCommand? {
+        val mentionsWhatsApp = text.contains("whatsapp") || text.contains("whats app")
+        val mentionsSms = containsWord(text, "sms") || text.contains("text message")
+        val stripped = text.replace(whatsappPrefixRegex, "").trim()
+
+        val koMatch = Regex("\\s+ko\\s+").find(stripped) ?: return null
+
+        val namePart = cleanName(stripped.substring(0, koMatch.range.first))
+        var rest = stripped.substring(koMatch.range.last + 1).trim()
+        rest = rest.replace(whatsappPrefixRegex, "").trim()
+
+        val verb = matchPhrase(rest, messageVerbs)
+
+        if (verb == null && !mentionsWhatsApp && !mentionsSms) return null
+        if (namePart.isEmpty()) return null
+
+        val body = if (verb == null) {
+            stripNoise(rest)
+        } else {
+            val match = phraseRegex(verb).find(rest)
+            if (match == null) {
+                stripNoise(rest)
+            } else {
+                val before = rest.substring(0, match.range.first).trim()
+                val after = rest.substring(match.range.last + 1)
+                    .trim()
+                    .removePrefix("ki ")
+                    .removePrefix("that ")
+                    .trim()
+                stripNoise(if (after.isNotEmpty()) after else before)
+            }
+        }
+
+        if (body.isEmpty()) return null
+
+        return if (mentionsSms && !mentionsWhatsApp) {
+            EvCommand.SendSms(contactName = namePart, message = body)
+        } else {
+            EvCommand.SendWhatsApp(contactName = namePart, message = body)
+        }
+    }
+
+    // --------------------------------------------------------------- device
 
     /**
      * Device commands.
@@ -186,14 +396,14 @@ object CommandParser {
             has(vibrateWords) -> DeviceAction.RINGER_VIBRATE
             has(ringerWords) -> DeviceAction.RINGER_NORMAL
 
+            has(volumeWords) && has(muteWords) -> DeviceAction.VOLUME_MUTE
+
             has(volumeWords) && hasModifier -> when {
-                has(muteWords) -> DeviceAction.VOLUME_MUTE
                 wantsMax -> DeviceAction.VOLUME_MAX
                 wantsDown || wantsOff -> DeviceAction.VOLUME_DOWN
                 else -> DeviceAction.VOLUME_UP
             }
 
-            has(volumeWords) && has(muteWords) -> DeviceAction.VOLUME_MUTE
             has(silentWords) -> DeviceAction.RINGER_SILENT
 
             has(brightnessWords) && hasModifier -> when {
@@ -214,46 +424,7 @@ object CommandParser {
         return action?.let { EvCommand.Device(it) }
     }
 
-    /**
-     * Handles both Hinglish word orders:
-     *   "rehan ko whatsapp pe bolo ki main aa raha hoon"  (body AFTER the verb)
-     *   "whatsapp pe rehan ko good morning bhej do"       (body BEFORE the verb)
-     */
-    private fun parseWhatsAppMessage(text: String): EvCommand? {
-        val mentionsWhatsApp = text.contains("whatsapp") || text.contains("whats app")
-        val stripped = text.replace(whatsappPrefixRegex, "").trim()
-
-        val koMatch = Regex("\\s+ko\\s+").find(stripped) ?: return null
-
-        val namePart = cleanName(stripped.substring(0, koMatch.range.first))
-        var rest = stripped.substring(koMatch.range.last + 1).trim()
-        rest = rest.replace(whatsappPrefixRegex, "").trim()
-
-        val verb = matchPhrase(rest, messageVerbs)
-
-        if (verb == null && !mentionsWhatsApp) return null
-        if (namePart.isEmpty()) return null
-
-        val body = if (verb == null) {
-            stripNoise(rest)
-        } else {
-            val match = phraseRegex(verb).find(rest)
-            if (match == null) {
-                stripNoise(rest)
-            } else {
-                val before = rest.substring(0, match.range.first).trim()
-                val after = rest.substring(match.range.last + 1)
-                    .trim()
-                    .removePrefix("ki ")
-                    .removePrefix("that ")
-                    .trim()
-                stripNoise(if (after.isNotEmpty()) after else before)
-            }
-        }
-
-        if (body.isEmpty()) return null
-        return EvCommand.SendWhatsApp(contactName = namePart, message = body)
-    }
+    // --------------------------------------------------------------- shared
 
     private fun cleanName(input: String): String = normalize(input)
         .split(" ")
