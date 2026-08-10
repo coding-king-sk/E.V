@@ -64,11 +64,7 @@ import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import kotlinx.coroutines.launch
 
-private data class DeviceTile(
-    val label: String,
-    val emoji: String,
-    val action: DeviceAction,
-)
+private data class DeviceTile(val label: String, val emoji: String, val action: DeviceAction)
 
 private val deviceTiles = listOf(
     DeviceTile("Torch", "\uD83D\uDD26", DeviceAction.TORCH_TOGGLE),
@@ -77,10 +73,10 @@ private val deviceTiles = listOf(
     DeviceTile("Volume +", "\uD83D\uDD0A", DeviceAction.VOLUME_UP),
     DeviceTile("Volume \u2212", "\uD83D\uDD09", DeviceAction.VOLUME_DOWN),
     DeviceTile("Silent", "\uD83D\uDD15", DeviceAction.RINGER_SILENT),
-    DeviceTile("Brightness", "\u2600\uFE0F", DeviceAction.BRIGHTNESS_MAX),
-    DeviceTile("Screenshot", "\uD83D\uDDBC\uFE0F", DeviceAction.SCREENSHOT),
+    DeviceTile("Brightness", "\u2600", DeviceAction.BRIGHTNESS_MAX),
+    DeviceTile("Screenshot", "\uD83D\uDDBC", DeviceAction.SCREENSHOT),
     DeviceTile("Lock", "\uD83D\uDD12", DeviceAction.LOCK_SCREEN),
-    DeviceTile("Settings", "\u2699\uFE0F", DeviceAction.SETTINGS),
+    DeviceTile("Settings", "\u2699", DeviceAction.SETTINGS),
 )
 
 @Composable
@@ -230,9 +226,157 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         SectionHeader("Device controls")
                     }
-                    items(visibleDeviceTiles, key = { "device_${it.action.name}" }) { tile ->
+                    items(visibleDeviceTiles, key = { "device_" + it.action.name }) { tile ->
                         TileCard(
                             label = tile.label,
                             onClick = { dispatch(EvCommand.Device(tile.action)) },
                         ) {
-                            
+                            Text(tile.emoji, style = MaterialTheme.typography.headlineMedium)
+                        }
+                    }
+                }
+
+                if (quickShortcuts.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHeader("Quick actions")
+                    }
+                    items(quickShortcuts, key = { "quick_" + it.id }) { shortcut ->
+                        TileCard(
+                            label = shortcut.label,
+                            onClick = {
+                                val message = when (val result = AppLauncher.launch(context, shortcut)) {
+                                    is LaunchResult.Opened -> result.label + " khul raha hai"
+                                    is LaunchResult.Fallback -> result.label + ": " + result.reason
+                                    is LaunchResult.Failed -> result.label + " open nahi ho paya"
+                                }
+                                notify(message)
+                            },
+                        ) {
+                            Text(shortcut.emoji, style = MaterialTheme.typography.headlineMedium)
+                        }
+                    }
+                }
+
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SectionHeader(
+                        if (loadingApps) "Phone ke apps load ho rahe hain\u2026"
+                        else "Phone ke apps (" + matchingApps.size + ")"
+                    )
+                }
+
+                items(matchingApps, key = { "app_" + it.packageName }) { app ->
+                    TileCard(
+                        label = app.label,
+                        onClick = {
+                            val opened = AppLauncher.launchPackage(context, app.packageName)
+                            notify(
+                                if (opened) app.label + " khul raha hai"
+                                else app.label + " open nahi ho paya"
+                            )
+                        },
+                    ) {
+                        val icon = app.icon
+                        if (icon != null) {
+                            Image(
+                                bitmap = icon,
+                                contentDescription = app.label,
+                                modifier = Modifier.size(40.dp),
+                            )
+                        } else {
+                            Text("\uD83D\uDCF1", style = MaterialTheme.typography.headlineMedium)
+                        }
+                    }
+                }
+
+                if (!loadingApps && matchingApps.isEmpty() && quickShortcuts.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = "Kuch nahi mila. Mic dabake bol ke bhi try kar sakte ho.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 24.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccessibilityBanner(onEnable: () -> Unit, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "\u267F Auto-send band hai",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = "WhatsApp ka Send button E.V khud daba sake, iske liye ek baar " +
+                    "Accessibility me 'E.V auto-send' on kar do. Device ke screenshot, " +
+                    "lock aur back/home buttons bhi isi se chalte hain.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = onEnable, modifier = Modifier.padding(top = 4.dp)) {
+                Text("Enable karo")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier.padding(top = 8.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun TileCard(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: @Composable () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.height(104.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            icon()
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun LauncherScreenPreview() {
+    EVTheme {
+        LauncherScreen()
+    }
+}
