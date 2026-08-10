@@ -12,10 +12,16 @@ android {
         applicationId = "com.ev.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.8.0"
+        versionCode = 11
+        versionName = "1.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Native libraries sirf arm64-v8a ke liye repo me hain. Isse APK me
+        // khaali architecture folders nahi bante.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -39,6 +45,16 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    packaging {
+        resources {
+            // commons-compress apne saath metadata laata hai jo APK me bekaar hai.
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/NOTICE*"
+            excludes += "/META-INF/LICENSE*"
+        }
     }
 
     testOptions {
@@ -69,6 +85,9 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.view)
+
+    // Wake word model .tar.bz2 me aata hai — use kholne ke liye.
+    implementation(libs.commons.compress)
 
     debugImplementation(libs.androidx.ui.tooling)
 
