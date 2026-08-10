@@ -1,6 +1,7 @@
 package com.ev.android.feature.command
 
 import com.ev.android.feature.device.DeviceAction
+import com.ev.android.feature.media.MediaAction
 
 /** An app (or web target) that a command should act on. */
 data class AppTarget(
@@ -21,6 +22,24 @@ sealed interface EvCommand {
 
     /** "rehan ko whatsapp pe bolo ki main aa raha hoon" */
     data class SendWhatsApp(val contactName: String?, val message: String) : EvCommand
+
+    /** "rehan ko sms bhejo ki main aa raha hoon" */
+    data class SendSms(val contactName: String, val message: String) : EvCommand
+
+    /** "rehan ko call lagao" */
+    data class CallContact(val contactName: String) : EvCommand
+
+    /** "next gaana", "gaana roko", "10 second aage" */
+    data class Media(val action: MediaAction) : EvCommand
+
+    /** "ye gaana kaun sa hai" */
+    data object IdentifySong : EvCommand
+
+    /** "5 minute ka timer lagao" */
+    data class Timer(val seconds: Int, val label: String?) : EvCommand
+
+    /** "subah 7 baje alarm lagao" */
+    data class Alarm(val hour: Int, val minute: Int) : EvCommand
 
     /** "torch on karo", "volume badhao", "screenshot lo" */
     data class Device(val action: DeviceAction) : EvCommand
