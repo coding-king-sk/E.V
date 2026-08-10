@@ -13,6 +13,12 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
+    <!-- Hands-free: "Hey E.V" sunne ke liye. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Device controls -->
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -29,6 +35,9 @@
         android:required="false" />
     <uses-feature
         android:name="android.hardware.telephony"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
         android:required="false" />
 
     <!--
@@ -107,6 +116,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".feature.voice.EvListeningService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".feature.accessibility.EvAccessibilityService"
