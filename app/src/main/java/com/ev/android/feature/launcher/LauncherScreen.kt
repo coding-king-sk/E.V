@@ -68,6 +68,7 @@ import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.media.MediaAction
 import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
+import com.ev.android.feature.tts.VoiceSetup
 import com.ev.android.feature.voice.EvListeningService
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
@@ -125,14 +126,23 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         loadingApps = false
     }
 
-    // TTS engine app ke saath hi zinda rehta hai, screen band hote hi chhod dete hain.
-    DisposableEffect(Unit) {
-        Speaker.init(context)
-        onDispose { Speaker.shutdown() }
-    }
-
     fun notify(message: String) {
         scope.launch { snackbarHostState.showSnackbar(message) }
+    }
+
+    /**
+     * TTS engine app ke saath zinda rehta hai.
+     *
+     * Agar acchi Hindi awaz phone me hai hi nahi, to bina kuch poochhe seedha
+     * Google ki voice-data install screen khul jaati hai \u2014 user ko bas
+     * "Install" dabana hai.
+     */
+    DisposableEffect(Unit) {
+        Speaker.init(context) {
+            notify("Acchi awaz ke liye Google voice data install kar lo")
+            VoiceSetup.openVoiceDataInstall(context)
+        }
+        onDispose { Speaker.shutdown() }
     }
 
     fun dispatch(command: EvCommand) {
@@ -187,10 +197,19 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         if (granted[Manifest.permission.RECORD_AUDIO] == true) {
             EvListeningService.start(context)
             handsFree = true
-            notify("Ab bas \"Hey E.V\" bolo")
         } else {
             handsFree = false
             notify("Mic ki permission ke bina hands-free nahi chalega")
+        }
+    }
+
+    fun micPermissionsMissing(): List<String> {
+        val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        return needed.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -202,15 +221,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             return
         }
 
-        val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            needed.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
-        val missing = needed.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-
+        val missing = micPermissionsMissing()
         if (missing.isNotEmpty()) {
             micLauncher.launch(missing.toTypedArray())
             return
@@ -219,6 +230,24 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         EvListeningService.start(context)
         handsFree = true
         notify("Ab bas \"Hey E.V\" bolo")
+    }
+
+    /**
+     * App khulte hi hands-free apne aap on.
+     *
+     * Toggle sirf isliye bacha hai ki kabhi khud band karna ho \u2014 roz roz on
+     * karne ki zaroorat nahi.
+     */
+    LaunchedEffect(Unit) {
+        if (EvListeningService.isRunning) return@LaunchedEffect
+
+        val missing = micPermissionsMissing()
+        if (missing.isEmpty()) {
+            EvListeningService.start(context)
+            handsFree = true
+        } else {
+            micLauncher.launch(missing.toTypedArray())
+        }
     }
 
     /** Permission maango (agar chahiye) phir command chalao. */
@@ -233,36 +262,41 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     }
 
     /**
-     * Pehle offline parser, aur wo haar jaye tabhi AI.
+     * Teen seedhiyan: offline parser -> AI se command -> AI se seedha jawab.
      *
-     * Isse roz ke commands turant aur free me chalte hain, aur network sirf
-     * ghumavdar sentences ke liye use hota hai.
+     * Roz ke command turant aur free me chalte hain; network sirf tab lagta
+     * hai jab baat ghumavdar ho ya sawaal ho.
      */
     fun runCommand(text: String) {
         if (text.isBlank()) return
         keyboard?.hide()
 
-        val command = CommandParser.parse(text, installedApps)
-        if (command !is EvCommand.Unknown) {
-            handle(command)
+        val parsed = CommandParser.parse(text, installedApps)
+        if (parsed !is EvCommand.Unknown) {
+            handle(parsed)
             return
         }
 
         scope.launch {
             busy = true
             val outcome = AiCommandResolver.resolve(context, text, installedApps)
+
+            if (outcome is AiOutcome.Resolved) {
+                busy = false
+                handle(outcome.command)
+                return@launch
+            }
+
+            // Command nahi bana \u2014 shayad ye sawaal hai. Groq se jawab lo.
+            val reply = com.ev.android.feature.ai.Conversation.answer(context, text)
             busy = false
 
-            when (outcome) {
-                is AiOutcome.Resolved -> handle(outcome.command)
+            val message = reply
+                ?: (outcome as? AiOutcome.Failed)?.reason
+                ?: "Samajh nahi aaya. Settings me Groq key daal do to main sawaalon ke jawab bhi de sakta hoon."
 
-                is AiOutcome.Failed -> {
-                    if (speakReplies) Speaker.speak(outcome.reason)
-                    snackbarHostState.showSnackbar(outcome.reason)
-                }
-
-                AiOutcome.Unavailable -> handle(command)
-            }
+            if (speakReplies) Speaker.speak(message)
+            snackbarHostState.showSnackbar(message)
         }
     }
 
