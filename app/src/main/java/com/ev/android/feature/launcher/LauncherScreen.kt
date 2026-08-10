@@ -21,15 +21,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -55,6 +54,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +74,7 @@ import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
-import com.ev.android.feature.device.DeviceAction
+import com.ev.android.feature.gallery.EvGallery
 import com.ev.android.feature.history.CommandHistory
 import com.ev.android.feature.history.HistoryEntry
 import com.ev.android.feature.hud.EvOrb
@@ -82,8 +83,8 @@ import com.ev.android.feature.hud.HudHeader
 import com.ev.android.feature.hud.HudSectionLabel
 import com.ev.android.feature.hud.HudStatusRow
 import com.ev.android.feature.hud.HudTabs
-import com.ev.android.feature.hud.HudTile
-import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.notes.Note
+import com.ev.android.feature.notes.Notes
 import com.ev.android.feature.settings.EvSettings
 import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
@@ -102,47 +103,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private data class DeviceTile(val label: String, val emoji: String, val action: DeviceAction)
-
-/** action == null ka matlab "ye gaana kaun sa hai". */
-private data class MediaTile(val label: String, val emoji: String, val action: MediaAction?)
-
 private const val TAB_COMMAND = "COMMAND"
-private const val TAB_APPS = "APPS"
-private const val TAB_TOOLS = "TOOLS"
+private const val TAB_NOTES = "NOTES"
+private const val TAB_GALLERY = "GALLERY"
 private const val TAB_HISTORY = "HISTORY"
 
-private val tabs = listOf(TAB_COMMAND, TAB_APPS, TAB_TOOLS, TAB_HISTORY)
-
-private val deviceTiles = listOf(
-    DeviceTile("Torch", "\uD83D\uDD26", DeviceAction.TORCH_TOGGLE),
-    DeviceTile("WiFi", "\uD83D\uDCF6", DeviceAction.WIFI_PANEL),
-    DeviceTile("Bluetooth", "\uD83D\uDD35", DeviceAction.BLUETOOTH),
-    DeviceTile("Volume +", "\uD83D\uDD0A", DeviceAction.VOLUME_UP),
-    DeviceTile("Volume \u2212", "\uD83D\uDD09", DeviceAction.VOLUME_DOWN),
-    DeviceTile("Silent", "\uD83D\uDD15", DeviceAction.RINGER_SILENT),
-    DeviceTile("Brightness", "\u2600", DeviceAction.BRIGHTNESS_MAX),
-    DeviceTile("Screenshot", "\uD83D\uDDBC", DeviceAction.SCREENSHOT),
-    DeviceTile("Lock", "\uD83D\uDD12", DeviceAction.LOCK_SCREEN),
-    DeviceTile("Settings", "\u2699", DeviceAction.SETTINGS),
-)
-
-private val mediaTiles = listOf(
-    MediaTile("Pause", "\u23F8", MediaAction.PAUSE),
-    MediaTile("Play", "\u25B6", MediaAction.PLAY),
-    MediaTile("Next", "\u23ED", MediaAction.NEXT),
-    MediaTile("Previous", "\u23EE", MediaAction.PREVIOUS),
-    MediaTile("Aage", "\u23E9", MediaAction.FORWARD),
-    MediaTile("Peeche", "\u23EA", MediaAction.REWIND),
-    MediaTile("Kaun sa gaana?", "\uD83C\uDFA7", null),
-)
+private val tabs = listOf(TAB_COMMAND, TAB_NOTES, TAB_GALLERY, TAB_HISTORY)
 
 /**
  * E.V ki main screen — HUD look.
  *
- * Design jaan-boojh ke "ek cheez pe dhyan" wala hai: beech me bas orb, jo
- * batata hai E.V so raha hai, sun raha hai ya soch raha hai. Apps, tools aur
- * history tabs ke peeche hain taaki roz ka istemal shaant lage.
+ * Beech me sirf orb rehta hai, jo batata hai E.V so raha hai, sun raha hai ya
+ * soch raha hai. Apps kholna aur torch/volume jaise kaam ab tabs me nahi hain —
+ * wo bolke ya likh ke hote hain ("instagram kholo", "torch on karo"), isliye
+ * screen khaali aur shaant rehti hai.
  */
 @Composable
 fun LauncherScreen(modifier: Modifier = Modifier) {
@@ -154,7 +128,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var input by remember { mutableStateOf("") }
     var tab by remember { mutableStateOf(TAB_COMMAND) }
     var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
-    var loadingApps by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
@@ -164,14 +137,25 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var showSettings by remember { mutableStateOf(false) }
     var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
     var status by remember { mutableStateOf("READY \u2014 BOLO YA LIKHO") }
+    var gallery by remember { mutableStateOf<List<EvGallery.Item>>(emptyList()) }
+    var galleryLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         CommandHistory.load(context)
+        Notes.load(context)
         accessibilityOn = AccessibilityHelper.isEnabled(context)
         apiKeySet = EvSettings.hasApiKey(context)
         handsFree = EvListeningService.isRunning
         installedApps = InstalledAppsRepository.load(context)
-        loadingApps = false
+    }
+
+    // Gallery har baar tab khulne pe refresh — beech me nayi photo li ho to
+    // wapas aate hi dikh jaye.
+    LaunchedEffect(tab) {
+        if (tab != TAB_GALLERY) return@LaunchedEffect
+        galleryLoading = true
+        gallery = EvGallery.load(context)
+        galleryLoading = false
     }
 
     fun notify(message: String) {
@@ -415,12 +399,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         },
     )
 
-    val quickShortcuts = remember(input) { AppCatalog.shortcuts.filter { it.matches(input) } }
-    val matchingApps = remember(input, installedApps) {
-        val q = input.trim()
-        if (q.isEmpty()) installedApps else installedApps.filter { it.label.contains(q, true) }
-    }
-
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = EvBlack,
@@ -438,11 +416,11 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(top = 10.dp),
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.size(16.dp))
 
             HudTabs(tabs = tabs, selected = tab, onSelect = { tab = it })
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.size(12.dp))
 
             HudStatusRow(
                 micOn = handsFree,
@@ -479,37 +457,19 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                         },
                     )
 
-                    TAB_APPS -> AppsPane(
-                        loadingApps = loadingApps,
-                        quickShortcuts = quickShortcuts,
-                        matchingApps = matchingApps,
-                        onShortcut = { shortcut ->
-                            val message = when (val result = AppLauncher.launch(context, shortcut)) {
-                                is LaunchResult.Opened -> result.label + " khul raha hai"
-                                is LaunchResult.Fallback -> result.label + ": " + result.reason
-                                is LaunchResult.Failed -> result.label + " open nahi ho paya"
-                            }
-                            notify(message)
+                    TAB_NOTES -> NotesPane(
+                        notes = Notes.items,
+                        onAdd = { text ->
+                            Notes.add(context, text)
+                            notify("Note save ho gaya")
                         },
-                        onApp = { app ->
-                            val opened = AppLauncher.launchPackage(context, app.packageName)
-                            notify(
-                                if (opened) app.label + " khul raha hai"
-                                else app.label + " open nahi ho paya"
-                            )
-                        },
+                        onDelete = { note -> Notes.remove(context, note) },
                     )
 
-                    TAB_TOOLS -> ToolsPane(
-                        onDevice = { action -> dispatch(EvCommand.Device(action)) },
-                        onMedia = { action ->
-                            dispatch(
-                                if (action == null) EvCommand.IdentifySong
-                                else EvCommand.Media(action)
-                            )
-                        },
-                        onCamera = { front -> handle(EvCommand.TakePhoto(front = front)) },
-                        onVideo = { handle(EvCommand.RecordVideo(front = false, seconds = 15)) },
+                    TAB_GALLERY -> GalleryPane(
+                        items = gallery,
+                        loading = galleryLoading,
+                        onOpen = { item -> EvGallery.open(context, item) },
                     )
 
                     else -> HistoryPane(
@@ -632,14 +592,6 @@ private fun CommandPane(
             modifier = Modifier.padding(top = 26.dp, start = 12.dp, end = 12.dp),
         )
 
-        Text(
-            text = "ENGINE LOCAL",
-            color = EvTextMuted,
-            fontSize = 12.sp,
-            letterSpacing = 2.sp,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-
         if (!accessibilityOn) {
             Box(
                 modifier = Modifier
@@ -661,127 +613,196 @@ private fun CommandPane(
     }
 }
 
+/**
+ * Chhote notes.
+ *
+ * Bolke bhi likhwa sakte ho — mic dabao, bolo, phir text yahan paste karke
+ * save kar do. Sab kuch phone me hi rehta hai.
+ */
 @Composable
-private fun AppsPane(
-    loadingApps: Boolean,
-    quickShortcuts: List<AppShortcut>,
-    matchingApps: List<InstalledApp>,
-    onShortcut: (AppShortcut) -> Unit,
-    onApp: (InstalledApp) -> Unit,
+private fun NotesPane(
+    notes: List<Note>,
+    onAdd: (String) -> Unit,
+    onDelete: (Note) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 100.dp),
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (quickShortcuts.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                HudSectionLabel("// quick")
-            }
-            items(quickShortcuts, key = { "quick_" + it.id }) { shortcut ->
-                HudTile(
-                    label = shortcut.label,
-                    onClick = { onShortcut(shortcut) },
-                    modifier = Modifier.height(98.dp),
-                    icon = { Text(shortcut.emoji, fontSize = 26.sp) },
+    var draft by remember { mutableStateOf("") }
+    val formatter = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            shape = RoundedCornerShape(14.dp),
+            placeholder = { Text("naya note\u2026", color = EvTextMuted, fontSize = 14.sp) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = EvTextPrimary,
+                unfocusedTextColor = EvTextPrimary,
+                focusedBorderColor = EvGreen,
+                unfocusedBorderColor = EvOutline,
+                cursorColor = EvGreen,
+                focusedContainerColor = EvSurfaceHigh,
+                unfocusedContainerColor = EvSurfaceHigh,
+            ),
+            trailingIcon = {
+                Box(
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(enabled = draft.isNotBlank()) {
+                            onAdd(draft)
+                            draft = ""
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "+",
+                        color = if (draft.isNotBlank()) EvGreen else EvTextMuted,
+                        fontSize = 24.sp,
+                    )
+                }
+            },
+        )
+
+        if (notes.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "ABHI KOI NOTE NAHI",
+                    color = EvTextMuted,
+                    fontSize = 13.sp,
+                    letterSpacing = 1.5.sp,
                 )
             }
+            return@Column
         }
 
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            HudSectionLabel(
-                if (loadingApps) "// apps load ho rahe hain"
-                else "// apps (" + matchingApps.size + ")"
-            )
-        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 12.dp),
+        ) {
+            item { HudSectionLabel("// notes (" + notes.size + ")") }
 
-        items(matchingApps, key = { "app_" + it.packageName }) { app ->
-            HudTile(
-                label = app.label,
-                onClick = { onApp(app) },
-                modifier = Modifier.height(98.dp),
-                icon = {
-                    val icon = app.icon
-                    if (icon != null) {
-                        Image(
-                            bitmap = icon,
-                            contentDescription = app.label,
-                            modifier = Modifier.size(36.dp),
+            items(notes, key = { it.at.toString() + it.text }) { note ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(EvSurfaceHigh)
+                        .border(BorderStroke(1.dp, EvOutline), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = note.text, color = EvTextPrimary, fontSize = 14.sp)
+                        Text(
+                            text = formatter.format(Date(note.at)),
+                            color = EvTextMuted,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 6.dp),
                         )
-                    } else {
-                        Text("\uD83D\uDCF1", fontSize = 26.sp)
                     }
-                },
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Text(
+                        text = "\u2715",
+                        color = EvTextMuted,
+                        fontSize = 16.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onDelete(note) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** E.V se li hui photo aur video. Tap karo to phone ki gallery me khulti hain. */
+@Composable
+private fun GalleryPane(
+    items: List<EvGallery.Item>,
+    loading: Boolean,
+    onOpen: (EvGallery.Item) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (items.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = if (loading) "LOAD HO RAHA HAI\u2026"
+                else "ABHI KOI PHOTO NAHI \u2014 \"PHOTO LO\" BOLO",
+                color = EvTextMuted,
+                fontSize = 13.sp,
+                letterSpacing = 1.5.sp,
+                textAlign = TextAlign.Center,
             )
+        }
+        return
+    }
+
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 104.dp),
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(items, key = { it.uri.toString() }) { item ->
+            GalleryTile(item = item, onOpen = { onOpen(item) })
         }
     }
 }
 
 @Composable
-private fun ToolsPane(
-    onDevice: (DeviceAction) -> Unit,
-    onMedia: (MediaAction?) -> Unit,
-    onCamera: (Boolean) -> Unit,
-    onVideo: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 100.dp),
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+private fun GalleryTile(item: EvGallery.Item, onOpen: () -> Unit) {
+    val context = LocalContext.current
+    var thumb by remember(item.uri) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(item.uri) {
+        thumb = EvGallery.thumbnail(context, item.uri)
+    }
+
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(14.dp))
+            .background(EvSurfaceHigh)
+            .border(BorderStroke(1.dp, EvOutline), RoundedCornerShape(14.dp))
+            .clickable(onClick = onOpen),
+        contentAlignment = Alignment.Center,
     ) {
-        item(span = { GridItemSpan(maxLineSpan) }) { HudSectionLabel("// camera") }
-
-        item {
-            HudTile(
-                label = "Photo",
-                onClick = { onCamera(false) },
-                modifier = Modifier.height(98.dp),
-                icon = { Text("\uD83D\uDCF7", fontSize = 26.sp) },
+        val bitmap = thumb
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
             )
-        }
-        item {
-            HudTile(
-                label = "Selfie",
-                onClick = { onCamera(true) },
-                modifier = Modifier.height(98.dp),
-                icon = { Text("\uD83E\uDD33", fontSize = 26.sp) },
-            )
-        }
-        item {
-            HudTile(
-                label = "Video",
-                onClick = onVideo,
-                modifier = Modifier.height(98.dp),
-                icon = { Text("\uD83C\uDFA5", fontSize = 26.sp) },
+        } else {
+            Text(
+                text = if (item.isVideo) "\uD83C\uDFA5" else "\uD83D\uDCF7",
+                fontSize = 28.sp,
             )
         }
 
-        item(span = { GridItemSpan(maxLineSpan) }) { HudSectionLabel("// jo abhi chal raha hai") }
-
-        items(mediaTiles, key = { "media_" + it.label }) { tile ->
-            HudTile(
-                label = tile.label,
-                onClick = { onMedia(tile.action) },
-                modifier = Modifier.height(98.dp),
-                icon = { Text(tile.emoji, fontSize = 26.sp) },
-            )
-        }
-
-        item(span = { GridItemSpan(maxLineSpan) }) { HudSectionLabel("// device") }
-
-        items(deviceTiles, key = { "device_" + it.action.name }) { tile ->
-            HudTile(
-                label = tile.label,
-                onClick = { onDevice(tile.action) },
-                modifier = Modifier.height(98.dp),
-                icon = { Text(tile.emoji, fontSize = 26.sp) },
-            )
+        if (item.isVideo) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(EvBlack)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text(text = "VIDEO", color = EvGreen, fontSize = 9.sp, letterSpacing = 1.sp)
+            }
         }
     }
 }

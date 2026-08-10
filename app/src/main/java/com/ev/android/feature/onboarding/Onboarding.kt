@@ -11,7 +11,12 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,18 +24,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -38,11 +38,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.ev.android.feature.accessibility.AccessibilityHelper
+import com.ev.android.ui.theme.EvBlack
+import com.ev.android.ui.theme.EvGreen
+import com.ev.android.ui.theme.EvOutline
+import com.ev.android.ui.theme.EvRed
+import com.ev.android.ui.theme.EvSurfaceHigh
+import com.ev.android.ui.theme.EvTextMuted
+import com.ev.android.ui.theme.EvTextPrimary
 
 /**
  * Pehli baar wala setup.
@@ -118,7 +128,10 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
 
     val doneCount = listOf(micDone, reachDone, accessibilityDone, batteryDone).count { it }
 
-    Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = EvBlack,
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -126,32 +139,69 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp),
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Wahi "E" badge jo main screen pe hai — pehli screen se hi app
+            // apni pehchaan wali lagti hai.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(BorderStroke(1.5.dp, EvGreen), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "E",
+                        color = EvGreen,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Spacer(modifier = Modifier.size(14.dp))
+
+                Text(
+                    text = "E.V",
+                    color = EvTextPrimary,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                )
+            }
 
             Text(
-                text = "\uD83D\uDC4B E.V me swagat hai",
-                style = MaterialTheme.typography.headlineMedium,
+                text = "SETUP",
+                color = EvGreen,
+                fontSize = 13.sp,
+                letterSpacing = 3.sp,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 22.dp),
             )
 
             Text(
                 text = "Chaar chhote step — ek baar kar lo, phir hamesha ke liye " +
                     "bas \"Hey E.V\" bolna hai.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp),
+                color = EvTextMuted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 6.dp),
             )
 
             LinearProgressIndicator(
                 progress = { doneCount / 4f },
+                color = EvGreen,
+                trackColor = EvSurfaceHigh,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp),
+                    .padding(top = 18.dp),
             )
 
             Text(
-                text = doneCount.toString() + " / 4 ho gaya",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 6.dp),
+                text = doneCount.toString() + " / 4 HO GAYA",
+                color = EvTextMuted,
+                fontSize = 11.sp,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier.padding(top = 8.dp),
             )
 
             StepCard(
@@ -162,7 +212,7 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
                     "jab notification dikhe — aapko hamesha pata rahega ki mic on hai.",
                 done = micDone,
                 required = true,
-                actionLabel = "Permission do",
+                actionLabel = "PERMISSION DO",
                 onAction = { permissionLauncher.launch(micPermissions.toTypedArray()) },
             )
 
@@ -174,19 +224,20 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
                     "khud send nahi karenge.",
                 done = reachDone,
                 required = false,
-                actionLabel = "Permission do",
+                actionLabel = "PERMISSION DO",
                 onAction = { permissionLauncher.launch(reachPermissions.toTypedArray()) },
             )
 
             StepCard(
                 number = 3,
-                title = "Auto-send (Accessibility)",
-                why = "Isse E.V khud WhatsApp ka Send button daba pata hai, aur " +
-                    "screenshot, screen lock, back/home bhi isi se chalte hain. " +
-                    "List me 'E.V auto-send' dhoondh ke on kar do.",
+                title = "Auto-send aur typing (Accessibility)",
+                why = "Isse E.V khud WhatsApp ka Send button daba pata hai, dusri app " +
+                    "ke message box me type kar pata hai, aur screenshot, screen lock, " +
+                    "back/home bhi isi se chalte hain. List me 'E.V auto-send' " +
+                    "dhoondh ke on kar do.",
                 done = accessibilityDone,
                 required = false,
-                actionLabel = "Settings kholo",
+                actionLabel = "SETTINGS KHOLO",
                 onAction = {
                     AccessibilityHelper.openSettings(context)
                     refresh++
@@ -202,7 +253,7 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
                     "dhoondh ke 'Don't optimize' / 'Allow' kar do.",
                 done = batteryDone,
                 required = true,
-                actionLabel = "Settings kholo",
+                actionLabel = "SETTINGS KHOLO",
                 onAction = {
                     runCatching {
                         settingsLauncher.launch(
@@ -212,34 +263,53 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
                 },
             )
 
-            Button(
-                onClick = {
-                    Onboarding.markDone(context)
-                    onFinished()
-                },
-                enabled = micDone,
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 24.dp),
+                    .padding(top = 26.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (micDone) EvGreen else EvSurfaceHigh)
+                    .border(
+                        BorderStroke(1.dp, if (micDone) EvGreen else EvOutline),
+                        RoundedCornerShape(16.dp),
+                    )
+                    .clickable(enabled = micDone) {
+                        Onboarding.markDone(context)
+                        onFinished()
+                    }
+                    .padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Text(if (doneCount == 4) "Sab ho gaya — chalu karo" else "Aage badho")
+                Text(
+                    text = if (doneCount == 4) "SAB HO GAYA \u2014 CHALU KARO" else "AAGE BADHO",
+                    color = if (micDone) EvBlack else EvTextMuted,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    textAlign = TextAlign.Center,
+                )
             }
 
             if (!micDone) {
                 Text(
                     text = "Mic ki permission ke bina aage nahi badh sakte.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp),
+                    color = EvRed,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 10.dp),
                 )
             }
 
-            TextButton(
-                onClick = { refresh++ },
-                modifier = Modifier.padding(bottom = 24.dp),
-            ) {
-                Text("Status dobara check karo")
-            }
+            Text(
+                text = "STATUS DOBARA CHECK KARO",
+                color = EvTextMuted,
+                fontSize = 11.sp,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier
+                    .padding(top = 16.dp, bottom = 28.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { refresh++ }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
         }
     }
 }
@@ -255,52 +325,77 @@ private fun StepCard(
     onAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 16.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (done) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.surfaceVariant,
-        ),
+            .padding(top = 14.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(EvSurfaceHigh)
+            .border(
+                BorderStroke(1.dp, if (done) EvGreen else EvOutline),
+                RoundedCornerShape(18.dp),
+            )
+            .padding(16.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .border(
+                        BorderStroke(1.dp, if (done) EvGreen else EvOutline),
+                        RoundedCornerShape(9.dp),
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (done) "\u2705" else number.toString() + "️\u20E3",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = if (done) "\u2713" else number.toString(),
+                    color = if (done) EvGreen else EvTextMuted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
                 )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                if (!required) {
-                    Text(
-                        text = "optional",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
             }
 
             Text(
-                text = why,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp),
+                text = title.uppercase(),
+                color = if (done) EvGreen else EvTextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                modifier = Modifier.weight(1f),
             )
 
-            if (!done) {
-                OutlinedButton(
-                    onClick = onAction,
-                    modifier = Modifier.padding(top = 12.dp),
-                ) {
-                    Text(actionLabel)
-                }
+            if (!required) {
+                Text(text = "OPTIONAL", color = EvTextMuted, fontSize = 10.sp, letterSpacing = 1.sp)
+            }
+        }
+
+        Text(
+            text = why,
+            color = EvTextMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+
+        if (!done) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 14.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(BorderStroke(1.dp, EvGreen), RoundedCornerShape(12.dp))
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = actionLabel,
+                    color = EvGreen,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
             }
         }
     }
