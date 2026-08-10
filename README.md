@@ -1,58 +1,110 @@
 # E.V
 
-Android voice assistant app \u2014 Kotlin + Jetpack Compose. Features ek-ek karke add ho rahe hain.
+Hinglish voice assistant for Android — Kotlin + Jetpack Compose, single-activity, no backend.
 
-- Package: `com.ev.android`
-- Kotlin 2.0.21, Compose BOM 2024.12.01, Material 3
-- AGP 8.7.3, Gradle 8.11.1
-- minSdk 24, target/compileSdk 35
+Bolo ya likho, aur phone ka kaam ho jaye: app kholna, gaana chalana, photo lena, message bhejna, reminder lagana. Sab kuch ek hi command line se.
+
+```
+"instagram kholo"
+"tum hi ho baja do"
+"photo lo"
+"rehan ko call lagao"
+"kal subah 8 baje yaad dilana ki dawai leni hai"
+"torch on karo aur photo lo"
+```
+
+- Package `com.ev.android` · minSdk 24 · target/compileSdk 35
+- Kotlin 2.0.21 · Compose BOM 2024.12.01 · Material 3 · AGP 8.7.3
+- APK har `main` push pe apne aap ban'ti hai → [Releases](../../releases)
+
+## Screen
+
+Ek hi HUD screen, chaar tab:
+
+| Tab | Kya hai |
+| --- | --- |
+| **COMMAND** | Orb, status, mic/camera buttons, command box |
+| **NOTES** | Chhote notes, sirf phone me |
+| **GALLERY** | E.V se li hui photo/video |
+| **HISTORY** | Pichle command — "kya suna" vs "kya samjha" |
+
+Apps kholna aur torch/volume jaise kaam tabs me nahi hain — wo bolke ya likhke hote hain.
 
 ## Features
 
-### 1. Voice + text commands (Hinglish)
-Mic \uD83C\uDFA4 dabao aur bolo, ya type karke \u25B6 dabao. Recognizer `hi-IN` pe set hai, isliye Hinglish theek se pakadta hai.
+### Awaaz
+- **Hands-free** — "Hey E.V" bolo, background service sunta rehta hai
+- **Hindi TTS** — phone ki sabse acchi Hindi voice apne aap chuni jaati hai
+- **Whisper (optional)** — Settings me on karo to mic button Groq Whisper use karega, jo Hinglish behtar samajhta hai. Internet aur API key chahiye
+- **Offline wake word (adhoora)** — sherpa-onnx ka code aur native library repo me hai, par abhi listening service se juda nahi hai
 
-| Bologe | Hoga |
+### Kaam
+- Koi bhi installed app kholna ("amazon kholo")
+- Gaana/video chalana — YouTube, YT Music, Spotify, Gaana
+- "Ye kaun sa gaana hai"
+- WhatsApp / SMS bhejna, call lagana
+- Camera — "photo lo", "selfie lo", "video banao" (khud khulta hai, khud kheenchta hai)
+- Dusri app me type karna — "instagram pe type karo hello"
+- Timer, alarm, reminder (reboot ke baad bhi zinda rehte hain)
+- Torch, WiFi, Bluetooth, volume, brightness, silent, screenshot, screen lock
+- **Multitasking** — "torch on karo aur photo lo" ek hi vaakya me
+
+### AI (optional)
+Jo command offline parser na samjhe, wahi Groq ko jata hai. Key na ho to app poori tarah offline chalti hai, bas thodi kam samajhdaar.
+
+## Kaise kaam karta hai
+
+```
+awaaz / text
+    ↓
+CommandParser        offline, turant, free
+    ↓ (samajh na aaye)
+AiCommandResolver    Groq → command
+    ↓ (phir bhi nahi)
+Conversation         Groq → seedha jawab
+    ↓
+CommandExecutor → Intent / AccessibilityService / CameraX
+```
+
+| Folder | Kaam |
 | --- | --- |
-| "YouTube pe paisa song lagao" | YouTube khulega, `paisa song` search hoga, pehla video **khud play** |
-| "Tum hi ho baja do" | YouTube pe wo gaana auto-play |
-| "Spotify pe arijit singh lagao" | Spotify me wo gaana play |
-| "WhatsApp kholo" | WhatsApp open |
-| "PhonePe open karo" | PhonePe open |
-| "YouTube pe cricket search karo" | Sirf results dikhenge, autoplay nahi |
-
-**Parser kaise kaam karta hai** (`feature/command/CommandParser.kt`):
-1. `"<app> pe ..."` pattern se target app nikalta hai
-2. Verb detect karta hai \u2014 play (`lagao / baja do / chalao / sunao / play`), open (`kholo / open karo / chalu karo`), search (`search karo / dhundo / khojo`)
-3. Bacha hua text = query. Filler words sirf **shuru/aakhir** se hatte hain, taaki gaane ka naam beech me na toote
-
-**Autoplay ka trick** (`CommandExecutor.kt`): `MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH` \u2014 yehi intent Google Assistant use karta hai. YouTube, YT Music, Spotify, Gaana sab isko handle karke best match seedha play kar dete hain. Fallback chain:
-1. `MEDIA_PLAY_FROM_SEARCH` target app pe
-2. `ACTION_SEARCH` target app pe
-3. `MEDIA_PLAY_FROM_SEARCH` bina package (koi bhi music app)
-4. YouTube results page \u2014 app me, warna browser me
-
-### 2. Saare installed apps
-Phone ka har launchable app real icon ke saath grid me dikhta hai, tap karo aur khul jaayega. Voice se bhi \u2014 "Amazon kholo" bologe to installed apps ki list me se match ho jayega (exact \u2192 no-space \u2192 prefix \u2192 contains).
-
-`QUERY_ALL_PACKAGES` permission ki zaroorat nahi \u2014 manifest me MAIN/LAUNCHER `<queries><intent>` block hai, jo Play Store policy ke hisaab se safe hai.
-
-### 3. Quick actions
-Curated shortcuts + system screens: Camera, Settings, Wi-Fi, Bluetooth, aur popular apps with web/Play Store fallback.
+| `feature/command` | Parser, executor, time parsing |
+| `feature/voice` | Hands-free service, mic input, Whisper |
+| `feature/wakeword` | sherpa-onnx KWS (adhoora) |
+| `feature/camera` | CameraX se auto photo/video |
+| `feature/accessibility` | Auto-send aur dusri app me typing |
+| `feature/ai` | Groq chat + Whisper |
+| `feature/hud` | HUD ke UI parts |
 
 ## Permissions
-Koi runtime permission nahi chahiye. Voice ke liye system `RecognizerIntent` activity use hoti hai, isliye `RECORD_AUDIO` E.V ko khud nahi chahiye.
 
-## Build locally
+Koi permission zabardasti nahi — jo feature use karoge, uske waqt hi maangi jayegi.
+
+| Permission | Kis liye | Na do to |
+| --- | --- | --- |
+| Mic | Hands-free, Whisper | Sirf typing chalegi |
+| Camera | Photo/video | Camera command band |
+| Contacts / SMS / Call | "X ko call lagao" | Dialer khulega, khud call nahi |
+| Accessibility | Auto-send, typing | Message likha milega, bhejna khud padega |
+| Battery optimization off | Hands-free zinda rahe | Service kuch der baad mar jayegi |
+
+API key sirf phone me (SharedPreferences) rehti hai — repo me kabhi nahi.
+
+## Build
+
 ```bash
 ./gradlew assembleDebug
 ```
-Android Studio me project open karke Run bhi kar sakte ho.
 
-> Gradle wrapper jar commit nahi hai (binary). Android Studio first sync pe khud bana dega, ya `gradle wrapper` chala lo.
+Ya Android Studio me open karke Run. Gradle wrapper jar commit nahi hai; first sync pe khud ban jata hai.
 
-## CI / Releases
-`.github/workflows/release.yml` har `main` push pe:
-1. Debug APK build karta hai
-2. Tag + release `v1.0.<run_number>` banata hai
-3. APK attach karta hai
+## CI
+
+`.github/workflows/release.yml` — har `main` push pe unit tests chalte hain, phir debug APK ban ke `v<version>-<run>` tag pe release ho jaati hai. Tests fail hue to APK nahi banti.
+
+## Abhi kya baaki hai
+
+- Wake word ko listening service se jodna
+- KWS model ka download URL verify karna
+- Release signing (abhi debug-signed APK hai)
+- Phone pe poora testing round

@@ -42,6 +42,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
     var key by remember { mutableStateOf(EvSettings.apiKey(context)) }
     var aiOn by remember { mutableStateOf(EvSettings.aiEnabled(context)) }
     var personalOn by remember { mutableStateOf(EvSettings.sendPersonalToAi(context)) }
+    var whisperOn by remember { mutableStateOf(EvSettings.whisperStt(context)) }
 
     var offlineWake by remember { mutableStateOf(EvSettings.offlineWakeWord(context)) }
     var modelUrl by remember { mutableStateOf(EvSettings.wakeWordModelUrl(context)) }
@@ -97,6 +98,28 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                     text = "Ye off rakhna behtar hai. In commands me contact ka naam aur " +
                         "message ka text hota hai, aur free tier pe providers prompts ko " +
                         "training ke liye use kar sakte hain.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+                Text(
+                    text = "Sunna (speech to text)",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+
+                SettingRow(
+                    label = "Mic pe Whisper (Groq) use karo",
+                    checked = whisperOn,
+                    onChange = { whisperOn = it },
+                )
+
+                Text(
+                    text = "Whisper Hinglish kaafi behtar samajhta hai. Lekin isme aapki " +
+                        "awaaz Groq ke server pe jaati hai aur internet chahiye \u2014 " +
+                        "bina internet ke mic Google recognizer pe hi chalega. Ye sirf " +
+                        "mic button pe lagta hai, hands-free \"Hey E.V\" pe nahi.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -226,6 +249,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                     EvSettings.setApiKey(context, key)
                     EvSettings.setAiEnabled(context, aiOn)
                     EvSettings.setSendPersonalToAi(context, personalOn)
+                    EvSettings.setWhisperStt(context, whisperOn)
                     EvSettings.setOfflineWakeWord(context, offlineWake)
                     EvSettings.setWakeWordModelUrl(context, modelUrl)
                     EvSettings.setWakeWordKeywords(context, keywords)

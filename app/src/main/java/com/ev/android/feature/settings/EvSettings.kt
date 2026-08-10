@@ -18,6 +18,7 @@ object EvSettings {
     private const val KEY_KWS_URL = "kws_model_url"
     private const val KEY_KWS_KEYWORDS = "kws_keywords"
     private const val KEY_KWS_THRESHOLD = "kws_threshold"
+    private const val KEY_WHISPER = "stt_whisper"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -51,6 +52,22 @@ object EvSettings {
 
     fun setSendPersonalToAi(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_AI_PERSONAL, value).apply()
+    }
+
+    // ------------------------------------------------------- sunna (STT)
+
+    /**
+     * Mic button pe Groq Whisper use karna hai ya Google recognizer.
+     *
+     * Default **off**. Whisper Hinglish behtar samajhta hai, par uske liye
+     * awaaz Groq ke server pe jaati hai aur internet chahiye — ye faisla user
+     * ka hona chahiye, hamara nahi.
+     */
+    fun whisperStt(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_WHISPER, false) && hasApiKey(context)
+
+    fun setWhisperStt(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_WHISPER, value).apply()
     }
 
     // ------------------------------------------------------- wake word
