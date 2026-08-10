@@ -40,8 +40,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -85,6 +83,7 @@ import com.ev.android.feature.hud.HudStatusRow
 import com.ev.android.feature.hud.HudTabs
 import com.ev.android.feature.notes.Note
 import com.ev.android.feature.notes.Notes
+import com.ev.android.feature.settings.ApiKeyDialog
 import com.ev.android.feature.settings.EvSettings
 import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
@@ -118,12 +117,15 @@ private val tabs = listOf(TAB_COMMAND, TAB_NOTES, TAB_GALLERY, TAB_HISTORY)
  * soch raha hai. Apps kholna aur torch/volume jaise kaam ab tabs me nahi hain —
  * wo bolke ya likh ke hote hain ("instagram kholo", "torch on karo"), isliye
  * screen khaali aur shaant rehti hai.
+ *
+ * Jawab dene ke liye pehle Material ka snackbar tha, par wo safed patti dark
+ * HUD pe bahut bhadki lagti thi. Ab har jawab orb ke neeche wali status line me
+ * aata hai — wahi jagah jahan user pehle se dekh raha hota hai.
  */
 @Composable
 fun LauncherScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
     val keyboard = LocalSoftwareKeyboardController.current
 
     var input by remember { mutableStateOf("") }
@@ -136,6 +138,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var apiKeySet by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var showApiKey by remember { mutableStateOf(false) }
     var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
     var status by remember { mutableStateOf("READY \u2014 BOLO YA LIKHO") }
     var gallery by remember { mutableStateOf<List<EvGallery.Item>>(emptyList()) }
@@ -159,8 +162,9 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         galleryLoading = false
     }
 
+    /** Chhoti si baat batani ho to status line hi kaafi hai. */
     fun notify(message: String) {
-        scope.launch { snackbarHostState.showSnackbar(message) }
+        status = message.uppercase()
     }
 
     /**
@@ -197,7 +201,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             )
 
             if (speakReplies) Speaker.speak(result.message)
-            snackbarHostState.showSnackbar(result.message)
         }
     }
 
@@ -372,7 +375,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
             val message = reply
                 ?: (outcome as? AiOutcome.Failed)?.reason
-                ?: "Samajh nahi aaya. Settings me Groq key daal do to main sawaalon ke jawab bhi de sakta hoon."
+                ?: "Samajh nahi aaya. API KEY pe tap karke Groq key daal do to main sawaalon ke jawab bhi de sakta hoon."
 
             status = message.uppercase()
 
@@ -384,7 +387,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             )
 
             if (speakReplies) Speaker.speak(message)
-            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -437,7 +439,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                     runCommand(spoken)
                 },
                 onFailure = { error ->
-                    status = "READY \u2014 BOLO YA LIKHO"
                     notify(error.message ?: "Whisper se nahi ho paya")
                 },
             )
@@ -447,7 +448,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = EvBlack,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -472,7 +472,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 coreActive = true,
                 apiKeySet = apiKeySet,
                 onMicClick = { toggleHandsFree() },
-                onApiKeyClick = { showSettings = true },
+                onApiKeyClick = { showApiKey = true },
             )
 
             if (busy) {
@@ -597,6 +597,19 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             },
         )
     }
+
+    if (showApiKey) {
+        ApiKeyDialog(
+            onDismiss = {
+                showApiKey = false
+                apiKeySet = EvSettings.hasApiKey(context)
+            },
+            onSaved = {
+                apiKeySet = EvSettings.hasApiKey(context)
+                notify(it)
+            },
+        )
+    }
 }
 
 /** Beech wala shaant sa screen — sirf orb aur ek line status. */
@@ -614,10 +627,12 @@ private fun CommandPane(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        // Pehle yahan dimmed = !listening && !busy tha, yaani aam haalat me orb
+        // hamesha 35% alpha pe — isliye poora design phika dikhta tha.
         EvOrb(
             listening = listening,
             busy = busy,
-            dimmed = !listening && !busy,
+            dimmed = false,
             modifier = Modifier.size(230.dp),
         )
 
@@ -628,7 +643,7 @@ private fun CommandPane(
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.5.sp,
             textAlign = TextAlign.Center,
-            maxLines = 2,
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 26.dp, start = 12.dp, end = 12.dp),
         )

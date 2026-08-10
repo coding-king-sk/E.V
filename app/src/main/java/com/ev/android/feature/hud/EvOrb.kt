@@ -31,10 +31,13 @@ import kotlin.math.sin
  *
  *  - dheemi saans jaisi pulse  -> ready, kuch nahi ho raha
  *  - tez pulse + tez ghoomta ring -> sun raha hai / kaam kar raha hai
- *  - halka dhundhla            -> hands-free band hai
  *
  * Poori cheez Canvas pe bani hai, koi image asset nahi — isliye APK me ek byte
  * bhi extra nahi jata aur har screen size pe sharp dikhta hai.
+ *
+ * **Stroke ki motai radius ke hisaab se hai, fixed px me nahi.** Pehle 1.5f px
+ * likha tha, jo 3x density wale phone pe itna patla ho jata tha ki rings dikhti
+ * hi nahi thi.
  */
 @Composable
 fun EvOrb(
@@ -73,19 +76,22 @@ fun EvOrb(
         label = "spin",
     )
 
-    val fade = if (dimmed) 0.35f else 1f
+    // Pehle ye 0.35 tha aur orb hamesha isi haalat me rehta tha — isliye poora
+    // design phika lagta tha. Ab dimmed sirf halka sa farak daalta hai.
+    val fade = if (dimmed) 0.85f else 1f
 
     Canvas(modifier = modifier) {
         val radius = size.minDimension / 2f
         val center = Offset(size.width / 2f, size.height / 2f)
 
         // Andar ka glow — beech me sabse tez, kinare pe gayab.
-        val coreRadius = radius * 0.62f * pulse
+        val coreRadius = radius * 0.64f * pulse
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    EvGreenGlow.copy(alpha = 0.95f * fade),
-                    EvGreen.copy(alpha = 0.45f * fade),
+                    EvGreenGlow.copy(alpha = 1f * fade),
+                    EvGreen.copy(alpha = 0.70f * fade),
+                    EvGreen.copy(alpha = 0.18f * fade),
                     Color.Transparent,
                 ),
                 center = center,
@@ -95,18 +101,26 @@ fun EvOrb(
             center = center,
         )
 
-        // Do patli rings — depth ke liye.
+        // Bahar wali saaf ring — design me sabse numaya cheez yahi hai.
         drawCircle(
-            color = EvGreen.copy(alpha = 0.50f * fade),
+            color = EvGreen.copy(alpha = 0.95f * fade),
             radius = radius * 0.62f,
             center = center,
-            style = Stroke(width = 1.5f),
+            style = Stroke(width = radius * 0.013f),
+        )
+
+        // Andar ki do halki rings — gehrai ke liye.
+        drawCircle(
+            color = EvGreen.copy(alpha = 0.45f * fade),
+            radius = radius * 0.46f,
+            center = center,
+            style = Stroke(width = radius * 0.009f),
         )
         drawCircle(
             color = EvGreen.copy(alpha = 0.30f * fade),
-            radius = radius * 0.46f,
+            radius = radius * 0.31f,
             center = center,
-            style = Stroke(width = 1.5f),
+            style = Stroke(width = radius * 0.008f),
         )
 
         // Bahar ka tick ring — ghoomta rehta hai.
@@ -120,7 +134,7 @@ fun EvOrb(
                 val outer = radius * 0.97f
 
                 drawLine(
-                    color = EvGreen.copy(alpha = (if (isLong) 0.85f else 0.35f) * fade),
+                    color = EvGreen.copy(alpha = (if (isLong) 0.95f else 0.55f) * fade),
                     start = Offset(
                         center.x + cos(angle) * inner,
                         center.y + sin(angle) * inner,
@@ -129,7 +143,7 @@ fun EvOrb(
                         center.x + cos(angle) * outer,
                         center.y + sin(angle) * outer,
                     ),
-                    strokeWidth = if (isLong) 3f else 1.8f,
+                    strokeWidth = radius * if (isLong) 0.020f else 0.012f,
                     cap = StrokeCap.Round,
                 )
             }

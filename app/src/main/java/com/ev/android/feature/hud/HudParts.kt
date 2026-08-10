@@ -1,6 +1,7 @@
 package com.ev.android.feature.hud
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -218,6 +225,9 @@ private fun StatusBox(
     }
 }
 
+/** Neeche ke teen buttons ke icon. */
+private enum class HudIcon { CAMERA, CLOSE, MIC }
+
 /** Camera / stop / mic wala neeche ka pill. */
 @Composable
 fun HudActionBar(
@@ -237,21 +247,20 @@ fun HudActionBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleAction(symbol = "\u25C9", tint = EvGreen, onClick = onCamera)
-        CircleAction(
-            symbol = "\u2715",
-            tint = EvRed,
-            enabled = busy || listening,
-            onClick = onStop,
-        )
-        CircleAction(symbol = "\u2B24", tint = EvGreen, onClick = onMic)
+        CircleAction(icon = HudIcon.CAMERA, tint = EvGreen, onClick = onCamera)
+
+        // Pehle ye tabhi laal hota tha jab kuch chal raha ho, warna sletee —
+        // design me hamesha laal hai, aur stop dabana kabhi nuksaan nahi karta.
+        CircleAction(icon = HudIcon.CLOSE, tint = EvRed, onClick = onStop)
+
+        CircleAction(icon = HudIcon.MIC, tint = EvGreen, onClick = onMic)
     }
 }
 
 @Composable
 private fun CircleAction(
-    symbol: String,
-    tint: androidx.compose.ui.graphics.Color,
+    icon: HudIcon,
+    tint: Color,
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
@@ -261,12 +270,99 @@ private fun CircleAction(
         modifier = Modifier
             .size(64.dp)
             .clip(CircleShape)
-            .background(color.copy(alpha = 0.08f))
+            .background(color.copy(alpha = 0.10f))
             .border(BorderStroke(2.dp, color), CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = symbol, color = color, fontSize = 22.sp)
+        // Icons Canvas pe bane hain. material-icons-extended add karne se APK
+        // me kai MB jud jate, sirf do icon ke liye.
+        Canvas(modifier = Modifier.size(26.dp)) {
+            val w = size.width
+            val h = size.height
+            val line = w * 0.09f
+
+            when (icon) {
+                HudIcon.CAMERA -> {
+                    // Upar ka chhota ubhaar
+                    drawRoundRect(
+                        color = color,
+                        topLeft = Offset(w * 0.28f, h * 0.10f),
+                        size = Size(w * 0.30f, h * 0.18f),
+                        cornerRadius = CornerRadius(w * 0.06f, w * 0.06f),
+                        style = Stroke(width = line),
+                    )
+                    // Body
+                    drawRoundRect(
+                        color = color,
+                        topLeft = Offset(0f, h * 0.24f),
+                        size = Size(w, h * 0.58f),
+                        cornerRadius = CornerRadius(w * 0.16f, w * 0.16f),
+                        style = Stroke(width = line),
+                    )
+                    // Lens
+                    drawCircle(
+                        color = color,
+                        radius = w * 0.16f,
+                        center = Offset(w / 2f, h * 0.53f),
+                        style = Stroke(width = line),
+                    )
+                }
+
+                HudIcon.CLOSE -> {
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.24f, h * 0.24f),
+                        end = Offset(w * 0.76f, h * 0.76f),
+                        strokeWidth = line * 1.15f,
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.76f, h * 0.24f),
+                        end = Offset(w * 0.24f, h * 0.76f),
+                        strokeWidth = line * 1.15f,
+                        cap = StrokeCap.Round,
+                    )
+                }
+
+                HudIcon.MIC -> {
+                    // Capsule
+                    drawRoundRect(
+                        color = color,
+                        topLeft = Offset(w * 0.34f, h * 0.06f),
+                        size = Size(w * 0.32f, h * 0.46f),
+                        cornerRadius = CornerRadius(w * 0.16f, w * 0.16f),
+                        style = Stroke(width = line),
+                    )
+                    // Neeche ka arc
+                    drawArc(
+                        color = color,
+                        startAngle = 0f,
+                        sweepAngle = 180f,
+                        useCenter = false,
+                        topLeft = Offset(w * 0.18f, h * 0.28f),
+                        size = Size(w * 0.64f, h * 0.46f),
+                        style = Stroke(width = line, cap = StrokeCap.Round),
+                    )
+                    // Danda aur base
+                    drawLine(
+                        color = color,
+                        start = Offset(w / 2f, h * 0.74f),
+                        end = Offset(w / 2f, h * 0.88f),
+                        strokeWidth = line,
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.30f, h * 0.92f),
+                        end = Offset(w * 0.70f, h * 0.92f),
+                        strokeWidth = line,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
     }
 }
 
