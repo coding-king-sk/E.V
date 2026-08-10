@@ -11,23 +11,31 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +45,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,8 +55,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +74,8 @@ import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
 import com.ev.android.feature.command.EvCommand
 import com.ev.android.feature.device.DeviceAction
+import com.ev.android.feature.history.CommandHistory
+import com.ev.android.feature.history.HistoryEntry
 import com.ev.android.feature.media.MediaAction
 import com.ev.android.feature.settings.SettingsDialog
 import com.ev.android.feature.tts.Speaker
@@ -73,6 +84,9 @@ import com.ev.android.feature.voice.EvListeningService
 import com.ev.android.feature.voice.rememberVoiceCommand
 import com.ev.android.ui.theme.EVTheme
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private data class DeviceTile(val label: String, val emoji: String, val action: DeviceAction)
 
@@ -117,9 +131,11 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var accessibilityOn by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var showAllHistory by remember { mutableStateOf(false) }
     var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
 
     LaunchedEffect(Unit) {
+        CommandHistory.load(context)
         accessibilityOn = AccessibilityHelper.isEnabled(context)
         handsFree = EvListeningService.isRunning
         installedApps = InstalledAppsRepository.load(context)
@@ -134,7 +150,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
      * TTS engine app ke saath zinda rehta hai.
      *
      * Agar acchi Hindi awaz phone me hai hi nahi, to bina kuch poochhe seedha
-     * Google ki voice-data install screen khul jaati hai \u2014 user ko bas
+     * Google ki voice-data install screen khul jaati hai — user ko bas
      * "Install" dabana hai.
      */
     DisposableEffect(Unit) {
@@ -145,12 +161,20 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         onDispose { Speaker.shutdown() }
     }
 
-    fun dispatch(command: EvCommand) {
+    fun dispatch(command: EvCommand, spoken: String? = null) {
         scope.launch {
             busy = true
             val result = CommandExecutor.execute(context, command)
             busy = false
             accessibilityOn = AccessibilityHelper.isEnabled(context)
+
+            CommandHistory.add(
+                context = context,
+                spoken = spoken ?: ("\uD83D\uDC46 " + CommandHistory.describe(command)),
+                understood = CommandHistory.describe(command),
+                reply = result.message,
+            )
+
             if (speakReplies) Speaker.speak(result.message)
             snackbarHostState.showSnackbar(result.message)
         }
@@ -186,7 +210,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     ) { _ ->
         val queued = pendingCommand
         pendingCommand = null
-        // Permission mile ya na mile, command chala dete hain \u2014 executor khud
+        // Permission mile ya na mile, command chala dete hain — executor khud
         // fallback karta hai (SMS draft, dialer, ya saaf error message).
         if (queued != null) dispatch(queued)
     }
@@ -235,7 +259,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     /**
      * App khulte hi hands-free apne aap on.
      *
-     * Toggle sirf isliye bacha hai ki kabhi khud band karna ho \u2014 roz roz on
+     * Toggle sirf isliye bacha hai ki kabhi khud band karna ho — roz roz on
      * karne ki zaroorat nahi.
      */
     LaunchedEffect(Unit) {
@@ -251,14 +275,14 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     }
 
     /** Permission maango (agar chahiye) phir command chalao. */
-    fun handle(command: EvCommand) {
+    fun handle(command: EvCommand, spoken: String? = null) {
         val missing = missingPermissions(command)
         if (missing.isNotEmpty()) {
             pendingCommand = command
             permissionLauncher.launch(missing.toTypedArray())
             return
         }
-        dispatch(command)
+        dispatch(command, spoken)
     }
 
     /**
@@ -273,7 +297,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
         val parsed = CommandParser.parse(text, installedApps)
         if (parsed !is EvCommand.Unknown) {
-            handle(parsed)
+            handle(parsed, text)
             return
         }
 
@@ -283,17 +307,24 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
             if (outcome is AiOutcome.Resolved) {
                 busy = false
-                handle(outcome.command)
+                handle(outcome.command, text)
                 return@launch
             }
 
-            // Command nahi bana \u2014 shayad ye sawaal hai. Groq se jawab lo.
+            // Command nahi bana — shayad ye sawaal hai. Groq se jawab lo.
             val reply = com.ev.android.feature.ai.Conversation.answer(context, text)
             busy = false
 
             val message = reply
                 ?: (outcome as? AiOutcome.Failed)?.reason
                 ?: "Samajh nahi aaya. Settings me Groq key daal do to main sawaalon ke jawab bhi de sakta hoon."
+
+            CommandHistory.add(
+                context = context,
+                spoken = text,
+                understood = if (reply != null) "Sawaal (AI)" else "Samajh nahi aaya",
+                reply = message,
+            )
 
             if (speakReplies) Speaker.speak(message)
             snackbarHostState.showSnackbar(message)
@@ -324,39 +355,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { Text("E.V") },
-                actions = {
-                    IconButton(onClick = { toggleHandsFree() }) {
-                        Text(
-                            text = if (handsFree) "\uD83D\uDC42" else "\uD83D\uDCA4",
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            speakReplies = !speakReplies
-                            if (!speakReplies) Speaker.stop()
-                            notify(
-                                if (speakReplies) "Ab E.V bol ke jawab dega"
-                                else "Awaz band \u2014 sirf screen pe dikhega"
-                            )
-                        },
-                    ) {
-                        Text(
-                            text = if (speakReplies) "\uD83D\uDD0A" else "\uD83D\uDD07",
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                    }
-
-                    IconButton(onClick = { showSettings = true }) {
-                        Text("\u2699", style = MaterialTheme.typography.titleLarge)
-                    }
-                },
-            )
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
@@ -365,11 +363,31 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
+            HeroHeader(
+                handsFree = handsFree,
+                speakReplies = speakReplies,
+                accessibilityOn = accessibilityOn,
+                onToggleHandsFree = { toggleHandsFree() },
+                onToggleSpeak = {
+                    speakReplies = !speakReplies
+                    if (!speakReplies) Speaker.stop()
+                    notify(
+                        if (speakReplies) "Ab E.V bol ke jawab dega"
+                        else "Awaz band \u2014 sirf screen pe dikhega"
+                    )
+                },
+                onSettings = { showSettings = true },
+                onMic = { startVoice() },
+            )
+
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
                 singleLine = true,
+                shape = RoundedCornerShape(16.dp),
                 label = { Text("Bolo ya likho") },
                 placeholder = { Text("YouTube pe paisa song lagao") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -409,6 +427,21 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                             onEnable = {
                                 AccessibilityHelper.openSettings(context)
                                 notify("List me 'E.V auto-send' dhoond ke on kar do")
+                            },
+                        )
+                    }
+                }
+
+                if (CommandHistory.entries.isNotEmpty() && input.isBlank()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        HistoryCard(
+                            entries = CommandHistory.entries,
+                            expanded = showAllHistory,
+                            onToggleExpand = { showAllHistory = !showAllHistory },
+                            onRepeat = { entry -> runCommand(entry.spoken) },
+                            onClear = {
+                                CommandHistory.clear(context)
+                                notify("History saaf kar di")
                             },
                         )
                     }
@@ -521,10 +554,201 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Upar wala bada card.
+ *
+ * Ek nazar me pata chal jata hai ki E.V sun raha hai ya nahi, awaz on hai ya
+ * nahi, aur accessibility chalu hai ya nahi — pehle ye sab chhote icons me
+ * chhupa hua tha.
+ */
+@Composable
+private fun HeroHeader(
+    handsFree: Boolean,
+    speakReplies: Boolean,
+    accessibilityOn: Boolean,
+    onToggleHandsFree: () -> Unit,
+    onToggleSpeak: () -> Unit,
+    onSettings: () -> Unit,
+    onMic: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+    ) {
+        Box(
+            modifier = Modifier.background(
+                Brush.linearGradient(
+                    listOf(colors.primaryContainer, colors.tertiaryContainer),
+                )
+            )
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "E.V",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onPrimaryContainer,
+                        )
+                        Text(
+                            text = if (handsFree) "Sun raha hoon \u2014 bas \"Hey E.V\" bolo"
+                            else "So raha hoon \u2014 mic dabao ya hands-free on karo",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onPrimaryContainer,
+                        )
+                    }
+
+                    IconButton(onClick = onSettings) {
+                        Text("\u2699", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.padding(top = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Card(
+                        onClick = onMic,
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.primary),
+                    ) {
+                        Text(
+                            text = "\uD83C\uDFA4  Bolo",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.onPrimary,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    AssistChip(
+                        onClick = onToggleHandsFree,
+                        label = { Text(if (handsFree) "Hands-free on" else "Hands-free off") },
+                        leadingIcon = { Text(if (handsFree) "\uD83D\uDC42" else "\uD83D\uDCA4") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = colors.surface,
+                        ),
+                    )
+                }
+
+                Row(modifier = Modifier.padding(top = 8.dp)) {
+                    AssistChip(
+                        onClick = onToggleSpeak,
+                        label = { Text(if (speakReplies) "Awaz on" else "Awaz off") },
+                        leadingIcon = { Text(if (speakReplies) "\uD83D\uDD0A" else "\uD83D\uDD07") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = colors.surface,
+                        ),
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    AssistChip(
+                        onClick = {},
+                        enabled = false,
+                        label = { Text(if (accessibilityOn) "Auto-send on" else "Auto-send off") },
+                        leadingIcon = { Text(if (accessibilityOn) "\u2705" else "\u267F") },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Pichle commands.
+ *
+ * Sabse bada faida debugging hai: "kya suna" aur "kya samjha" alag alag dikhta
+ * hai, to galti kahan hui ye turant pata chal jata hai.
+ */
+@Composable
+private fun HistoryCard(
+    entries: List<HistoryEntry>,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onRepeat: (HistoryEntry) -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val visible = if (expanded) entries.take(20) else entries.take(3)
+    val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "\uD83D\uDD52 Pichle commands",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClear) { Text("Saaf karo") }
+            }
+
+            visible.forEachIndexed { index, entry ->
+                if (index > 0) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                }
+
+                Column(modifier = Modifier.padding(top = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = entry.spoken,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = formatter.format(Date(entry.at)),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        TextButton(onClick = { onRepeat(entry) }) { Text("Phir se") }
+                    }
+
+                    Text(
+                        text = "\u2192 " + entry.understood,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+
+                    Text(
+                        text = entry.reply,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (entries.size > 3) {
+                TextButton(onClick = onToggleExpand) {
+                    Text(if (expanded) "Kam dikhao" else "Sab dikhao (" + entries.size + ")")
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AccessibilityBanner(onEnable: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer,
         ),
@@ -568,6 +792,7 @@ private fun TileCard(
     Card(
         onClick = onClick,
         modifier = modifier.height(104.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
