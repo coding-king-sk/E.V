@@ -5,78 +5,73 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * TTS = Text To Speech. Pipeline ka teesra hissa.
  *
- * Do cheezein khaas hain:
+ * Teen cheezein khaas hain:
  *
- * 1. **Refcount** \u2014 UI aur listening service dono isi engine ko use karte hain.
- *    Pehle screen band hote hi shutdown ho jata tha aur service ki awaz mar
- *    jati thi. Ab jab tak ek bhi user baaki hai, engine zinda rehta hai.
+ * 1. **Google engine force** \u2014 phone ka default engine (Samsung/Xiaomi wala)
+ *    robot jaisa bolta hai. Hum jaan bujh ke `com.google.android.tts` pakadte
+ *    hain. Wo na mile tabhi default pe girte hain.
  *
- * 2. **onDone callback** \u2014 hands-free mode me jab tak E.V bol raha hai, mic
- *    band rakhna padta hai. Warna wo apni hi awaz sun ke command samajh leta.
+ * 2. **Sabse acchi awaz** \u2014 engine ke saari voices me se highest quality wali
+ *    Hindi voice chunte hain. Network voices sabse natural hoti hain.
+ *
+ * 3. **Refcount + onDone** \u2014 UI aur listening service dono ek hi engine share
+ *    karte hain, aur hands-free mode ko pata chalta rehta hai ki bolna kab
+ *    khatam hua (tab tak mic band rehta hai).
  */
 object Speaker {
 
     private var engine: TextToSpeech? = null
+    private var appContext: Context? = null
     private var users = 0
+    private var triedGoogle = false
 
     @Volatile
     private var ready = false
 
+    /** True jab high-quality Hindi awaz phone me hai hi nahi. */
+    @Volatile
+    var needsVoiceData = false
+        private set
+
     private var pending: Pair<String, (() -> Unit)?>? = null
+    private var onVoiceDataMissing: (() -> Unit)? = null
 
     private val callbacks = ConcurrentHashMap<String, () -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * @param onVoiceDataMissing tab chalta hai jab acchi Hindi awaz phone me
+     *   nahi hai \u2014 UI isse download screen khol deti hai.
+     */
     @Synchronized
-    fun init(context: Context) {
+    fun init(context: Context, onVoiceDataMissing: (() -> Unit)? = null) {
+        if (onVoiceDataMissing != null) this.onVoiceDataMissing = onVoiceDataMissing
+
         users++
-        if (engine != null) return
+        if (engine != null) {
+            // Engine pehle se ready hai par awaz missing thi \u2014 UI ko abhi bata do.
+            if (needsVoiceData) main.post { this.onVoiceDataMissing?.invoke() }
+            return
+        }
 
-        val appContext = context.applicationContext
-        engine = TextToSpeech(appContext) { status ->
-            if (status != TextToSpeech.SUCCESS) return@TextToSpeech
+        val app = context.applicationContext
+        appContext = app
+        triedGoogle = VoiceSetup.isGoogleTtsInstalled(app)
 
-            // Hinglish Hindi voice me sabse natural lagta hai; na mile to English.
-            val hindi = Locale("hi", "IN")
-            val result = engine?.setLanguage(hindi)
-            if (result == TextToSpeech.LANG_MISSING_DATA ||
-                result == TextToSpeech.LANG_NOT_SUPPORTED
-            ) {
-                engine?.setLanguage(Locale.US)
-            }
-
-            engine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
-
-                override fun onDone(utteranceId: String?) = finish(utteranceId)
-
-                @Deprecated("Older API", ReplaceWith("onError(utteranceId, errorCode)"))
-                override fun onError(utteranceId: String?) = finish(utteranceId)
-
-                override fun onError(utteranceId: String?, errorCode: Int) = finish(utteranceId)
-
-                override fun onStop(utteranceId: String?, interrupted: Boolean) =
-                    finish(utteranceId)
-            })
-
-            ready = true
-            pending?.let { (text, onDone) ->
-                pending = null
-                speak(text, onDone)
-            }
+        engine = if (triedGoogle) {
+            TextToSpeech(app, { status -> configure(status) }, VoiceSetup.GOOGLE_TTS_PACKAGE)
+        } else {
+            TextToSpeech(app) { status -> configure(status) }
         }
     }
 
-    /**
-     * @param onDone bolna khatam hone pe main thread pe chalta hai. Ye hamesha
-     *   chalta hai \u2014 error ya stop pe bhi \u2014 taki caller kabhi atke na.
-     */
     fun speak(text: String, onDone: (() -> Unit)? = null) {
         if (text.isBlank()) {
             onDone?.let { main.post(it) }
@@ -112,6 +107,101 @@ object Speaker {
         ready = false
         pending = null
         callbacks.clear()
+    }
+
+    // ------------------------------------------------------------- internals
+
+    private fun configure(status: Int) {
+        val tts = engine
+
+        if (status != TextToSpeech.SUCCESS || tts == null) {
+            // Google engine se init fail hua \u2014 default engine pe wapas.
+            if (triedGoogle) {
+                triedGoogle = false
+                val app = appContext ?: return
+                runCatching { tts?.shutdown() }
+                engine = TextToSpeech(app) { retryStatus -> configure(retryStatus) }
+            }
+            return
+        }
+
+        val hindi = Locale("hi", "IN")
+
+        when (tts.isLanguageAvailable(hindi)) {
+            TextToSpeech.LANG_MISSING_DATA -> {
+                flagMissingVoice()
+                tts.setLanguage(Locale.US)
+            }
+
+            TextToSpeech.LANG_NOT_SUPPORTED -> tts.setLanguage(Locale.US)
+
+            else -> tts.setLanguage(hindi)
+        }
+
+        applyBestVoice(tts)
+
+        tts.setSpeechRate(1.0f)
+        tts.setPitch(1.0f)
+
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) = Unit
+
+            override fun onDone(utteranceId: String?) = finish(utteranceId)
+
+            @Deprecated("Purana API", ReplaceWith("onError(utteranceId, errorCode)"))
+            override fun onError(utteranceId: String?) = finish(utteranceId)
+
+            override fun onError(utteranceId: String?, errorCode: Int) = finish(utteranceId)
+
+            override fun onStop(utteranceId: String?, interrupted: Boolean) = finish(utteranceId)
+        })
+
+        ready = true
+        pending?.let { (text, onDone) ->
+            pending = null
+            speak(text, onDone)
+        }
+    }
+
+    /**
+     * Engine ki saari voices me se sabse acchi Hindi voice.
+     *
+     * Ranking: pehle quality, phir network voice (wo sabse natural hoti hai).
+     * Hindi na mile to Indian English, taki Hinglish theek sunai de.
+     */
+    private fun applyBestVoice(tts: TextToSpeech) {
+        val voices = runCatching { tts.voices }.getOrNull().orEmpty()
+            .filterNotNull()
+            .filterNot {
+                it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+            }
+
+        if (voices.isEmpty()) return
+
+        val rank = compareBy<Voice>(
+            { it.quality },
+            { if (it.isNetworkConnectionRequired) 1 else 0 },
+        )
+
+        val best = voices.filter { it.locale.language == "hi" }.maxWithOrNull(rank)
+            ?: voices
+                .filter { it.locale.language == "en" && it.locale.country == "IN" }
+                .maxWithOrNull(rank)
+
+        if (best == null) {
+            flagMissingVoice()
+            return
+        }
+
+        runCatching { tts.voice = best }
+
+        // NORMAL se neeche matlab wahi bheeni robot wali awaz.
+        if (best.quality < Voice.QUALITY_HIGH) flagMissingVoice()
+    }
+
+    private fun flagMissingVoice() {
+        needsVoiceData = true
+        main.post { onVoiceDataMissing?.invoke() }
     }
 
     private fun finish(utteranceId: String?) {
