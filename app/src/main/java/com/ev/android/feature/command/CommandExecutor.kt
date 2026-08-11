@@ -4,23 +4,29 @@ import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.AlarmClock
 import android.provider.MediaStore
 import android.provider.Settings
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.calling.Caller
+import com.ev.android.feature.calling.WhatsAppCaller
 import com.ev.android.feature.camera.CameraCapture
 import com.ev.android.feature.contacts.ContactsRepository
 import com.ev.android.feature.contacts.PhoneNumbers
 import com.ev.android.feature.daily.DailyTasks
 import com.ev.android.feature.device.DeviceControls
+import com.ev.android.feature.info.Calculator
+import com.ev.android.feature.info.PhoneInfo
 import com.ev.android.feature.launcher.AppLauncher
 import com.ev.android.feature.media.MediaAction
 import com.ev.android.feature.media.MediaControls
 import com.ev.android.feature.media.SongIdentifier
 import com.ev.android.feature.media.YouTubeResolver
 import com.ev.android.feature.messaging.SmsSender
+import com.ev.android.feature.notes.Notes
 import com.ev.android.feature.reminders.Reminders
+import com.ev.android.feature.settings.EvSettings
 import kotlinx.coroutines.delay
 import java.net.URLEncoder
 
@@ -42,9 +48,24 @@ object CommandExecutor {
         is EvCommand.OpenApp -> openApp(context, command.target)
         is EvCommand.PlayMedia -> playMedia(context, command.query, command.target)
         is EvCommand.SearchInApp -> searchInApp(context, command.query, command.target)
+        is EvCommand.WebSearch -> webSearch(context, command.query)
         is EvCommand.SendWhatsApp -> sendWhatsApp(context, command.contactName, command.message)
         is EvCommand.SendSms -> sendSms(context, command.contactName, command.message)
         is EvCommand.CallContact -> callContact(context, command.contactName)
+        is EvCommand.WhatsAppCall -> whatsAppCall(context, command.contactName, command.video)
+
+        is EvCommand.Note -> {
+            Notes.load(context)
+            Notes.add(context, command.text)
+            CommandResult.Success("Note kar liya: \"" + command.text + "\"")
+        }
+
+        is EvCommand.Info -> CommandResult.Success(PhoneInfo.answer(context, command.kind))
+
+        is EvCommand.Calculate ->
+            Calculator.evaluate(command.expression)
+                ?.let { CommandResult.Success(it) }
+                ?: CommandResult.Failure("Ye hisaab samajh nahi aaya")
 
         is EvCommand.Media ->
             if (MediaControls.perform(context, command.action)) {
@@ -140,6 +161,41 @@ object CommandExecutor {
         return if (allOk) CommandResult.Success(joined) else CommandResult.Failure(joined)
     }
 
+    /** "google pe X search karo" \u2014 seedha browser me. */
+    private fun webSearch(context: Context, query: String): CommandResult {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val uri = Uri.parse("https://www.google.com/search?q=$encoded")
+
+        return if (AppLauncher.startIntent(context, Intent(Intent.ACTION_VIEW, uri))) {
+            CommandResult.Success("Google pe \"$query\" search kar diya")
+        } else {
+            CommandResult.Failure("Browser khul nahi paya")
+        }
+    }
+
+    private suspend fun whatsAppCall(
+        context: Context,
+        contactName: String,
+        video: Boolean,
+    ): CommandResult {
+        val realName = EvSettings.resolveAlias(context, contactName)
+        val kind = if (video) "video call" else "call"
+
+        if (WhatsAppCaller.call(context, realName, video)) {
+            return CommandResult.Success("$realName ko WhatsApp $kind lag rahi hai")
+        }
+
+        if (!ContactsRepository.hasPermission(context)) {
+            return CommandResult.Failure("Contacts ki permission chahiye WhatsApp call ke liye")
+        }
+
+        // Yahan tak aaye matlab contact to hai par uski WhatsApp wali row nahi
+        // mili \u2014 ya to wo WhatsApp pe hai hi nahi, ya number save nahi hai.
+        return CommandResult.Failure(
+            "\"$realName\" ka WhatsApp $kind nahi mila \u2014 dekho contact WhatsApp pe hai ya nahi"
+        )
+    }
+
     /**
      * App ke text box me likhna.
      *
@@ -149,6 +205,10 @@ object CommandExecutor {
      * text bhar deti hai.
      */
     private fun typeText(context: Context, command: EvCommand.TypeText): CommandResult {
+        if (!EvSettings.autoType(context)) {
+            return CommandResult.Failure("Auto type Settings me band hai")
+        }
+
         if (!AccessibilityHelper.isEnabled(context)) {
             return CommandResult.Failure(
                 "Type karne ke liye ek baar Accessibility me 'E.V auto-send' on karna padega"
@@ -180,9 +240,16 @@ object CommandExecutor {
      * settings, wifi, bluetooth. Inka koi package nahi hota, isliye pehle ye
      * seedha "open nahi ho paya" bol dete the. Ab inke liye system ka apna
      * intent chalta hai.
+     *
+     * Gallery, ghadi aur dialer ka bhi yahi haal hai: har phone me alag app
+     * hoti hai, isliye package ki jagah kaam bata dete hain aur Android khud
+     * us phone ki app chun leta hai.
      */
     private fun systemIntentFor(label: String): Intent? = when (label.lowercase()) {
         "camera" -> Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+        "gallery", "photos" -> Intent(Intent.ACTION_VIEW).setType("image/*")
+        "clock" -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
+        "dialer", "phone" -> Intent(Intent.ACTION_DIAL)
         "settings", "setting" -> Intent(Settings.ACTION_SETTINGS)
         "wifi", "wi-fi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
         "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
@@ -263,18 +330,24 @@ object CommandExecutor {
             return openApp(context, CommandParser.whatsapp)
         }
 
-        val number = resolveNumber(context, contactName)
-            ?: return contactFailure(context, contactName)
+        val realName = EvSettings.resolveAlias(context, contactName)
 
-        val autoSend = AccessibilityHelper.isEnabled(context)
+        val number = resolveNumber(context, realName)
+            ?: return contactFailure(context, realName)
+
+        // Do cheezein zaroori hain: service on ho, aur user ne switch band na
+        // kiya ho. Switch isliye hai ki kabhi bhejne se pehle padhna hota hai.
+        val autoSend = AccessibilityHelper.isEnabled(context) && EvSettings.whatsappAutoSend(context)
         if (autoSend) {
             EvAccessibilityService.armWhatsAppAutoSend()
         }
 
-        val successMessage = if (autoSend) {
-            "$contactName ko message bheja jaa raha hai\u2026"
-        } else {
-            "$contactName ka chat khul gaya \u2014 send dabao (auto-send ke liye Accessibility on karo)"
+        val successMessage = when {
+            autoSend -> "$realName ko message bheja jaa raha hai\u2026"
+            !EvSettings.whatsappAutoSend(context) ->
+                "$realName ka chat khul gaya, message likha hua hai \u2014 send dabao"
+            else ->
+                "$realName ka chat khul gaya \u2014 send dabao (auto-send ke liye Accessibility on karo)"
         }
 
         val encoded = URLEncoder.encode(message, "UTF-8").replace("+", "%20")
@@ -301,32 +374,36 @@ object CommandExecutor {
         contactName: String,
         message: String,
     ): CommandResult {
-        val number = resolveNumber(context, contactName)
-            ?: return contactFailure(context, contactName)
+        val realName = EvSettings.resolveAlias(context, contactName)
+
+        val number = resolveNumber(context, realName)
+            ?: return contactFailure(context, realName)
 
         if (SmsSender.send(context, number, message)) {
-            return CommandResult.Success("$contactName ko SMS bhej diya")
+            return CommandResult.Success("$realName ko SMS bhej diya")
         }
 
         return if (SmsSender.openDraft(context, number, message)) {
-            CommandResult.Success("$contactName ka SMS type kar diya \u2014 send dabao")
+            CommandResult.Success("$realName ka SMS type kar diya \u2014 send dabao")
         } else {
             CommandResult.Failure("SMS bhej nahi paya")
         }
     }
 
     private suspend fun callContact(context: Context, contactName: String): CommandResult {
-        val number = resolveNumber(context, contactName)
-            ?: return contactFailure(context, contactName)
+        val realName = EvSettings.resolveAlias(context, contactName)
+
+        val number = resolveNumber(context, realName)
+            ?: return contactFailure(context, realName)
 
         if (!Caller.call(context, number)) {
             return CommandResult.Failure("Call nahi lag payi")
         }
 
         return if (Caller.dialedDirectly(context)) {
-            CommandResult.Success("$contactName ko call lag rahi hai")
+            CommandResult.Success("$realName ko call lag rahi hai")
         } else {
-            CommandResult.Success("$contactName ka number dialer me hai \u2014 call button dabao")
+            CommandResult.Success("$realName ka number dialer me hai \u2014 call button dabao")
         }
     }
 
@@ -340,7 +417,10 @@ object CommandExecutor {
         if (!ContactsRepository.hasPermission(context)) {
             CommandResult.Failure("Contacts ki permission chahiye naam se contact dhoondne ke liye")
         } else {
-            CommandResult.Failure("\"$contactName\" naam ka contact nahi mila")
+            CommandResult.Failure(
+                "\"$contactName\" naam ka contact nahi mila \u2014 galat naam sun raha ho to " +
+                    "Settings me alias likh do"
+            )
         }
 
     private fun mediaMessage(action: MediaAction): String = when (action) {
