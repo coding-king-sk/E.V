@@ -1,5 +1,6 @@
 package com.ev.android.feature.bubble
 
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,18 +14,27 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RadialGradient
+import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.ev.android.MainActivity
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * Bubble ko bahar se chalane wale chhote helpers.
@@ -34,6 +44,12 @@ import kotlin.math.min
  * yahan uska intent bhi rakha hai.
  */
 object Bubble {
+
+    /** Bubble se app khuli aur seedha sunna shuru karna hai. */
+    const val EXTRA_LISTEN = "ev_bubble_listen"
+
+    /** Bubble se app khuli aur ye command chalani hai. */
+    const val EXTRA_COMMAND = "ev_bubble_command"
 
     /** Kya "Display over other apps" mil chuki hai? */
     fun canShow(context: Context): Boolean = Settings.canDrawOverlays(context)
@@ -68,15 +84,27 @@ object Bubble {
  * service ko chup-chaap maar deta hai. Notification ki importance sabse kam
  * rakhi hai taaki wo chup rahe.
  *
- * Tap  -> E.V khul jata hai
- * Drag -> bubble jahan chhodo wahin ruk jata hai (jagah yaad rehti hai)
+ * Single tap  -> neeche chhota sa action bar khulta hai (peeche wali app
+ *                dikhti rehti hai)
+ * Double tap  -> seedha mic - bolo aur kaam ho jaye
+ * Drag        -> chhodte hi kinare pe chipak jata hai, taaki beech ka hissa
+ *                khaali rahe
+ * Neeche X pe chhodo -> bubble abhi ke liye band
  * Lamba dabao -> bubble band
+ * Kuch der haath na lage -> halka transparent, taaki peeche wali screen dikhe
  */
 class BubbleService : Service() {
 
     private var windowManager: WindowManager? = null
     private var orb: OrbView? = null
     private var params: WindowManager.LayoutParams? = null
+
+    private var trash: View? = null
+    private var panel: View? = null
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val fadeRunnable = Runnable { orb?.animate()?.alpha(IDLE_ALPHA)?.setDuration(400)?.start() }
+    private var pendingTap: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -89,6 +117,9 @@ class BubbleService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        hidePanel()
+        hideTrash()
         orb?.let { view ->
             // Service maut ke waqt view hataana zaroori hai, warna orb screen pe
             // atka reh jata hai aur phone restart tak nahi jata.
@@ -100,6 +131,14 @@ class BubbleService : Service() {
 
     // ------------------------------------------------------------ overlay
 
+    private fun overlayType(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
     private fun showOrb() {
         if (!Bubble.canShow(this)) {
             stopSelf()
@@ -109,20 +148,13 @@ class BubbleService : Service() {
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         windowManager = manager
 
-        val sizePx = (SIZE_DP * resources.displayMetrics.density).toInt()
-
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
+        val sizePx = dp(SIZE_DP)
 
         val saved = prefs()
         val layout = WindowManager.LayoutParams(
             sizePx,
             sizePx,
-            type,
+            overlayType(),
             // NOT_FOCUSABLE zaroori hai - warna neeche wali app ka keyboard
             // aur buttons kaam karna band kar dete hain.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -130,7 +162,7 @@ class BubbleService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = saved.getInt(KEY_X, 24)
+            x = saved.getInt(KEY_X, 0)
             y = saved.getInt(KEY_Y, 320)
         }
         params = layout
@@ -141,6 +173,8 @@ class BubbleService : Service() {
 
         runCatching { manager.addView(view, layout) }
             .onFailure { stopSelf() }
+
+        scheduleFade()
     }
 
     /**
@@ -161,6 +195,7 @@ class BubbleService : Service() {
         var touchY = 0f
         var downAt = 0L
         var moved = false
+        var lastTapAt = 0L
 
         val slop = 12f * resources.displayMetrics.density
 
@@ -173,6 +208,7 @@ class BubbleService : Service() {
                     touchY = event.rawY
                     downAt = System.currentTimeMillis()
                     moved = false
+                    wakeUp()
                     view.setPressedLook(true)
                     true
                 }
@@ -183,9 +219,11 @@ class BubbleService : Service() {
                     if (abs(dx) > slop || abs(dy) > slop) moved = true
 
                     if (moved) {
+                        if (trash == null) showTrash()
                         layout.x = startX + dx.toInt()
                         layout.y = startY + dy.toInt()
                         runCatching { manager.updateViewLayout(view, layout) }
+                        highlightTrash(inTrashZone(event.rawX, event.rawY))
                     }
                     true
                 }
@@ -195,15 +233,47 @@ class BubbleService : Service() {
                     val heldMs = System.currentTimeMillis() - downAt
 
                     when {
-                        moved -> savePosition(layout.x, layout.y)
+                        moved && inTrashZone(event.rawX, event.rawY) -> {
+                            hideTrash()
+                            stopSelf()
+                        }
+
+                        moved -> {
+                            hideTrash()
+                            snapToEdge(view, layout, manager)
+                            scheduleFade()
+                        }
+
                         heldMs >= LONG_PRESS_MS -> stopSelf()
-                        else -> openApp()
+
+                        else -> {
+                            val now = System.currentTimeMillis()
+                            if (now - lastTapAt <= DOUBLE_TAP_MS) {
+                                // Doosra tap - pehle wala kaam raddi me.
+                                pendingTap?.let { handler.removeCallbacks(it) }
+                                pendingTap = null
+                                lastTapAt = 0L
+                                hidePanel()
+                                launchMain(listen = true)
+                            } else {
+                                lastTapAt = now
+                                val task = Runnable {
+                                    pendingTap = null
+                                    togglePanel()
+                                }
+                                pendingTap = task
+                                handler.postDelayed(task, DOUBLE_TAP_MS)
+                            }
+                            scheduleFade()
+                        }
                     }
                     true
                 }
 
                 MotionEvent.ACTION_CANCEL -> {
                     view.setPressedLook(false)
+                    hideTrash()
+                    scheduleFade()
                     true
                 }
 
@@ -212,9 +282,219 @@ class BubbleService : Service() {
         }
     }
 
-    private fun openApp() {
+    // -------------------------------------------------------- snap to edge
+
+    /**
+     * Chhodte hi bubble kinare pe chala jata hai.
+     *
+     * Beech me latka hua bubble sabse zyada disturb karta hai - jo padh rahe
+     * ho wahi dhak leta hai. Jis taraf zyada paas hai, usi taraf sarak jata
+     * hai, halke se.
+     */
+    private fun snapToEdge(
+        view: View,
+        layout: WindowManager.LayoutParams,
+        manager: WindowManager,
+    ) {
+        val screenWidth = resources.displayMetrics.widthPixels
+        val sizePx = dp(SIZE_DP)
+        val center = layout.x + sizePx / 2
+        val target = if (center < screenWidth / 2) 0 else screenWidth - sizePx
+
+        // Upar-neeche bhi thoda sambhal lete hain, warna bubble status bar ke
+        // peeche ya navigation bar ke neeche gum ho jata hai.
+        val screenHeight = resources.displayMetrics.heightPixels
+        layout.y = layout.y.coerceIn(dp(24), screenHeight - sizePx - dp(24))
+
+        ValueAnimator.ofInt(layout.x, target).apply {
+            duration = SNAP_MS
+            addUpdateListener { anim ->
+                layout.x = anim.animatedValue as Int
+                runCatching { manager.updateViewLayout(view, layout) }
+            }
+            start()
+        }
+
+        savePosition(target, layout.y)
+    }
+
+    // ------------------------------------------------------------ fade
+
+    /** Haath lagte hi poora saaf. */
+    private fun wakeUp() {
+        handler.removeCallbacks(fadeRunnable)
+        orb?.animate()?.alpha(1f)?.setDuration(120)?.start()
+    }
+
+    /** Kuch der kuch na ho to dheere se halka pad jata hai. */
+    private fun scheduleFade() {
+        handler.removeCallbacks(fadeRunnable)
+        handler.postDelayed(fadeRunnable, IDLE_MS)
+    }
+
+    // ------------------------------------------------------------ trash
+
+    /** Neeche ka "X" - drag karke yahan chhodo to bubble abhi ke liye band. */
+    private fun showTrash() {
+        val manager = windowManager ?: return
+
+        val icon = TextView(this).apply {
+            text = "\u2715"
+            setTextColor(Color.WHITE)
+            textSize = 24f
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xCC1A1A1A.toInt())
+                setStroke(dp(1), 0xFFFF5252.toInt())
+            }
+            alpha = 0f
+        }
+
+        val size = dp(TRASH_DP)
+        val layout = WindowManager.LayoutParams(
+            size,
+            size,
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = dp(TRASH_MARGIN_DP)
+        }
+
+        runCatching {
+            manager.addView(icon, layout)
+            trash = icon
+            icon.animate().alpha(1f).setDuration(150).start()
+        }
+    }
+
+    private fun hideTrash() {
+        val view = trash ?: return
+        trash = null
+        runCatching { windowManager?.removeView(view) }
+    }
+
+    /** Paas aate hi X thoda bada ho jata hai - pata chalta hai ki chhod sakte ho. */
+    private fun highlightTrash(near: Boolean) {
+        val view = trash ?: return
+        val scale = if (near) 1.3f else 1f
+        view.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
+    }
+
+    private fun inTrashZone(rawX: Float, rawY: Float): Boolean {
+        val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
+        val zoneTop = screenHeight - dp(TRASH_MARGIN_DP + TRASH_DP + 40)
+        val centerX = screenWidth / 2f
+        return rawY >= zoneTop && abs(rawX - centerX) <= dp(90)
+    }
+
+    // ------------------------------------------------------------ panel
+
+    private fun togglePanel() {
+        if (panel != null) hidePanel() else showPanel()
+    }
+
+    /**
+     * Single tap wala chhota bar.
+     *
+     * Poori app kholne ki zaroorat nahi - jo kaam sabse zyada hote hain wo
+     * neeche ek patli si patti me aa jaate hain, aur peeche wali app dikhti
+     * rehti hai.
+     */
+    private fun showPanel() {
+        val manager = windowManager ?: return
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+
+        row.addView(roundButton("\uD83D\uDCF7") { launchMain(command = "photo lo") })
+        row.addView(gap())
+        row.addView(roundButton("\u2191") { launchMain() })
+        row.addView(gap())
+        row.addView(pill())
+        row.addView(gap())
+        row.addView(roundButton("\uD83C\uDFA4") { launchMain(listen = true) })
+        row.addView(gap())
+        row.addView(roundButton("\u2715") { hidePanel() })
+
+        val layout = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.BOTTOM
+            y = dp(18)
+        }
+
+        runCatching {
+            manager.addView(row, layout)
+            panel = row
+            row.alpha = 0f
+            row.animate().alpha(1f).setDuration(160).start()
+        }
+    }
+
+    private fun hidePanel() {
+        val view = panel ?: return
+        panel = null
+        runCatching { windowManager?.removeView(view) }
+    }
+
+    private fun roundButton(glyph: String, onClick: () -> Unit): View =
+        TextView(this).apply {
+            text = glyph
+            setTextColor(0xFFF2F5F2.toInt())
+            textSize = 18f
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xF20B0D0B.toInt())
+                setStroke(dp(1), 0xFF1E241F.toInt())
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+            setOnClickListener { onClick() }
+        }
+
+    private fun pill(): View =
+        TextView(this).apply {
+            text = "E.V se poochho\u2026"
+            setTextColor(0xFF7C857D.toInt())
+            textSize = 14f
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(26).toFloat()
+                setColor(0xF20B0D0B.toInt())
+                setStroke(dp(1), 0xFF1E241F.toInt())
+            }
+            layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
+            setOnClickListener { launchMain() }
+        }
+
+    private fun gap(): View =
+        View(this).apply {
+            layoutParams = ViewGroup.LayoutParams(dp(8), dp(1))
+        }
+
+    // ------------------------------------------------------------ helpers
+
+    private fun launchMain(command: String? = null, listen: Boolean = false) {
+        hidePanel()
+
         val intent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (listen) intent.putExtra(Bubble.EXTRA_LISTEN, true)
+        if (command != null) intent.putExtra(Bubble.EXTRA_COMMAND, command)
+
         runCatching { startActivity(intent) }
     }
 
@@ -223,6 +503,8 @@ class BubbleService : Service() {
     }
 
     private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     // ------------------------------------------------------- notification
 
@@ -269,7 +551,7 @@ class BubbleService : Service() {
 
         return builder
             .setContentTitle("E.V bubble chalu hai")
-            .setContentText("Bubble pe tap karo, lamba dabao to band")
+            .setContentText("Tap - bar, double tap - mic, lamba dabao - band")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(open)
             .setOngoing(true)
@@ -277,22 +559,30 @@ class BubbleService : Service() {
     }
 
     /**
-     * Chhota orb.
+     * Ghoomta hua taar wala gola.
      *
      * App wala bada orb Compose se banta hai; use overlay me daalne ke liye
-     * poora lifecycle setup chahiye hota hai. Yahan sirf ek gol chamakta hua
-     * daayra chahiye, isliye seedha Canvas pe bana diya - halka aur bharosemand.
+     * poora lifecycle setup chahiye hota hai. Isliye yahan wahi shakl seedha
+     * Canvas pe banayi hai - kaali gend ke upar hari lakeeren, jo dheere
+     * dheere ghoomti hain. Lakeeren kinare pe paas paas aur beech me door
+     * dikhti hain, isi se gol hone ka ehsaas hota hai.
      */
     private class OrbView(context: Context) : View(context) {
 
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val core = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = GREEN
+            strokeCap = Paint.Cap.ROUND
+        }
+        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = GREEN
         }
-        private val core = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
-        private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN }
+        private val oval = RectF()
 
+        private var phase = 0f
         private var pressed = false
 
         fun setPressedLook(value: Boolean) {
@@ -307,38 +597,71 @@ class BubbleService : Service() {
 
             val cx = w / 2f
             val cy = h / 2f
-            val radius = min(w, h) / 2f
+            val outer = min(w, h) / 2f
+            val radius = outer * if (pressed) 0.74f : 0.8f
 
             glow.shader = RadialGradient(
                 cx,
                 cy,
-                radius,
+                outer,
                 intArrayOf(GREEN_SOFT, GREEN_FADE, Color.TRANSPARENT),
-                floatArrayOf(0f, 0.65f, 1f),
+                floatArrayOf(0f, 0.6f, 1f),
                 Shader.TileMode.CLAMP,
             )
-            canvas.drawCircle(cx, cy, radius, glow)
+            canvas.drawCircle(cx, cy, outer, glow)
 
-            val body = radius * if (pressed) 0.56f else 0.62f
-            canvas.drawCircle(cx, cy, body, core)
+            canvas.drawCircle(cx, cy, radius, core)
 
-            ring.strokeWidth = radius * 0.06f
-            canvas.drawCircle(cx, cy, body, ring)
+            // Kinare ki chamakti hui dhaar.
+            rim.strokeWidth = outer * 0.035f
+            rim.alpha = 220
+            canvas.drawCircle(cx, cy, radius, rim)
 
-            // Beech me ek hi bindu - app wale orb ki tarah.
-            canvas.drawCircle(cx, cy, radius * 0.1f, dot)
+            line.strokeWidth = outer * 0.028f
+
+            // Khade taar (meridian) - ghoomte hue patle-chaude hote hain.
+            for (i in 0 until MERIDIANS) {
+                val angle = phase + i * (Math.PI.toFloat() / MERIDIANS)
+                val halfWidth = radius * cos(angle)
+                oval.set(cx - abs(halfWidth), cy - radius, cx + abs(halfWidth), cy + radius)
+                line.alpha = (70 + 170 * abs(sin(angle))).toInt().coerceIn(40, 255)
+                canvas.drawOval(oval, line)
+            }
+
+            // Lete hue taar (latitude) - inse gend bharti hui lagti hai.
+            for (i in 1 until LATITUDES) {
+                val t = i.toFloat() / LATITUDES
+                val y = -radius + 2f * radius * t
+                val halfWidth = radius * kotlin.math.sqrt((1f - (y / radius) * (y / radius)).coerceAtLeast(0f))
+                val halfHeight = radius * 0.1f
+                oval.set(cx - halfWidth, cy + y - halfHeight, cx + halfWidth, cy + y + halfHeight)
+                line.alpha = 110
+                canvas.drawOval(oval, line)
+            }
+
+            phase += SPIN_STEP
+            postInvalidateOnAnimation()
         }
 
         private companion object {
             const val GREEN = 0xFF00E676.toInt()
             const val GREEN_SOFT = 0x5500E676
             const val GREEN_FADE = 0x2200E676
+            const val MERIDIANS = 5
+            const val LATITUDES = 4
+            const val SPIN_STEP = 0.012f
         }
     }
 
     private companion object {
         const val SIZE_DP = 72
+        const val TRASH_DP = 62
+        const val TRASH_MARGIN_DP = 70
         const val LONG_PRESS_MS = 600L
+        const val DOUBLE_TAP_MS = 280L
+        const val SNAP_MS = 180L
+        const val IDLE_MS = 4000L
+        const val IDLE_ALPHA = 0.45f
         const val NOTIFICATION_ID = 4201
         const val CHANNEL_ID = "ev_bubble"
         const val PREFS = "ev_bubble"
