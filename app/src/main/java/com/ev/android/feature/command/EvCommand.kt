@@ -69,6 +69,9 @@ sealed interface EvCommand {
     /** "battery kitni hai", "time kya hua", "storage kitna bacha" */
     data class Info(val kind: InfoKind) : EvCommand
 
+    /** "meri location batao" */
+    data object WhereAmI : EvCommand
+
     /** "1500 ka 18% kitna hota hai" */
     data class Calculate(val expression: String) : EvCommand
 

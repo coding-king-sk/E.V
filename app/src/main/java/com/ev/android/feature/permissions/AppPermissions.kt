@@ -29,7 +29,7 @@ data class EvPermission(
  * Saari permissions ek jagah.
  *
  * Yahan sirf wahi permissions hain jinke peeche app ka koi asli feature hai.
- * Storage wali pehle list me thi — wo sirf Android 9 aur usse purane pe lagti
+ * Storage wali pehle list me thi \u2014 wo sirf Android 9 aur usse purane pe lagti
  * thi, isliye nikal di gayi.
  */
 object AppPermissions {
@@ -57,6 +57,12 @@ object AppPermissions {
             permission = Manifest.permission.READ_CONTACTS,
             label = "Contacts",
             why = "\"Rehan ko call lagao\" me naam se number dhoondhne ke liye.",
+        ),
+        EvPermission(
+            permission = Manifest.permission.ACCESS_FINE_LOCATION,
+            label = "Location",
+            why = "Sirf \"meri location batao\" ke liye. E.V location kabhi background " +
+                "me nahi leta aur kahin bhejta bhi nahi.",
         ),
         EvPermission(
             permission = Manifest.permission.SEND_SMS,

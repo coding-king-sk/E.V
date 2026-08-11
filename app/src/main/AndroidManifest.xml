@@ -20,6 +20,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+        "Meri location batao".
+        Sirf FINE maangna zaroori nahi \u2014 COARSE bhi ho to mohalle ka naam bata
+        dete hain, aur ye kam khatarnak permission hai.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!--
         "Photo lo" / "video banao".
         Android 9 aur usse purane phones me gallery me save karne ke liye storage
         permission chahiye; Android 10+ me MediaStore khud sambhal leta hai.
@@ -44,7 +52,7 @@
         Reminders. SCHEDULE_EXACT_ALARM Android 12+ pe user se maanga jata hai;
         na mile to E.V inexact alarm pe fallback kar leta hai.
         RECEIVE_BOOT_COMPLETED isliye ki reboot ke baad pending reminders
-        dobara set ho jayein — Android reboot pe saare alarms bhool jata hai.
+        dobara set ho jayein \u2014 Android reboot pe saare alarms bhool jata hai.
     -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -61,6 +69,9 @@
         android:required="false" />
     <uses-feature
         android:name="android.hardware.microphone"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.location"
         android:required="false" />
 
     <!--
