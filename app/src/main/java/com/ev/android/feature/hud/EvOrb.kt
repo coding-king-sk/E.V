@@ -14,7 +14,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import com.ev.android.ui.theme.EvGreenGlow
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
@@ -25,14 +24,17 @@ import kotlin.math.sqrt
 /**
  * Ek dot se bana ghoomta hua globe \u2014 E.V ka chehra.
  *
- * Design reference se do cheezein aati hain:
+ * Design reference se teen cheezein aati hain:
  *  1. Dots latitude ki seedhi lines me hain (bikhre hue nahi). Isi se wo
  *     "wireframe globe" wala look aata hai; random dots noise lagte hain.
- *  2. Sphere thoda tilt hai, isliye upar-neeche ke rings ellipse dikhte hain
- *     aur globe flat circle ki jagah 3D lagta hai.
+ *  2. Beech me sirf EK chamakti hui line hai \u2014 equator. Pehle yahan teen
+ *     rings thi jo paas-paas hone ki wajah se ek moti patti jaisi dikhti thi.
+ *  3. Poora orb safed/chandi hai. Pehle sun-ne ke waqt dots hare ho jate the,
+ *     jo reference se bilkul match nahi karta tha. Ab mic on hone ka pata
+ *     rang se nahi \u2014 orb thoda zyada chamakta hai aur tez ghoomta hai.
  *
- * Equator aur poles ke paas ki rings jaan-boojh ke zyada bright hain \u2014
- * reference me wahi lines sabse pehle aankh me aati hain.
+ * Sphere thoda tilt hai, isliye upar-neeche ke rings ellipse dikhte hain aur
+ * globe flat circle ki jagah 3D lagta hai.
  */
 private class OrbDot(
     val x: Float,
@@ -91,12 +93,12 @@ private fun buildSphere(): List<OrbDot> {
         }
     }
 
-    // Chamakne wali lines: beech ki teen (equator band) aur dono taraf ke rings.
-    ringAt(0f, 130, true, dots)
-    ringAt(0.035f, 128, true, dots)
-    ringAt(-0.035f, 128, true, dots)
+    // Beech me sirf ek line. Dots thode zyada rakhe hain taaki wo ek theek
+    // se chamakti hui lakeer bane, na ki moti patti.
+    ringAt(0f, 132, true, dots)
 
-    for (y in listOf(0.86f, 0.93f, -0.86f, -0.93f)) {
+    // Poles ke paas ek-ek halki ring \u2014 inhi se sphere jhuka hua dikhta hai.
+    for (y in listOf(0.9f, -0.9f)) {
         val radius = sqrt((1f - y * y).coerceAtLeast(0f))
         ringAt(y, max(14, (EQUATOR_DOTS * radius * 1.6f).roundToInt()), true, dots)
     }
@@ -117,7 +119,8 @@ fun EvOrb(
 
     // Sun-ne ya sochne ke waqt tez ghoomta hai \u2014 isse pata chalta hai ki
     // app zinda hai. Idle me dheere, taaki battery aur aankh dono bache.
-    val spinMillis = if (listening || busy) 9000 else 22000
+    val active = listening || busy
+    val spinMillis = if (active) 9000 else 22000
     val angle by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -135,10 +138,8 @@ fun EvOrb(
         label = "pulse",
     )
 
-    // Reference me orb safed/chandi jaisa hai. Sun-ne ke waqt halki hari
-    // chamak aati hai taaki bina text padhe pata chal jaye ki mic on hai.
-    val base = Color(0xFFEAF2EC)
-    val accent = if (listening || busy) EvGreenGlow else base
+    // Ek hi rang, poore orb me \u2014 thanda safed, halka sa neela-chandi.
+    val base = Color(0xFFEFF4F6)
 
     Canvas(modifier = modifier) {
         val center = Offset(size.width / 2f, size.height / 2f)
@@ -155,19 +156,22 @@ fun EvOrb(
 
         val fade = if (dimmed) 0.45f else 1f
 
+        // Mic on hone ka ishara: sirf chamak badhti hai, rang wahi rehta hai.
+        val boost = if (active) 1.18f else 1f
+
         // Peeche ki halki roshni \u2014 orb kaale background pe tairta hua lagta hai.
         drawCircle(
-            color = accent.copy(alpha = 0.05f * fade),
+            color = base.copy(alpha = 0.05f * fade * boost),
             radius = radius * 1.06f,
             center = center,
         )
 
         dots.forEach { dot ->
-            // Pehle Y-axis pe ghumao (ye globe ka spin hai)…
+            // Pehle Y-axis pe ghumao (ye globe ka spin hai)\u2026
             val x1 = dot.x * cosSpin + dot.z * sinSpin
             val z1 = -dot.x * sinSpin + dot.z * cosSpin
 
-            // …phir sphere ko thoda jhukao, taaki upar ka ring dikhe.
+            // \u2026phir sphere ko thoda jhukao, taaki upar ka ring dikhe.
             val y1 = dot.y * cosTilt - z1 * sinTilt
             val z2 = dot.y * sinTilt + z1 * cosTilt
 
@@ -175,14 +179,14 @@ fun EvOrb(
             // isi se depth ka ehsaas hota hai.
             val depth = ((z2 + 1f) / 2f).coerceIn(0f, 1f)
 
-            val alpha = ((if (dot.bright) 0.45f else 0.22f) + depth * 0.7f)
-                .coerceIn(0f, 1f) * fade
+            val alpha = ((if (dot.bright) 0.5f else 0.2f) + depth * 0.68f)
+                .coerceIn(0f, 1f) * fade * boost
 
-            val dotRadius = (if (dot.bright) 1.55f else 1.2f) *
+            val dotRadius = (if (dot.bright) 1.6f else 1.15f) *
                 (0.55f + depth * 0.95f) * dotScale
 
             drawCircle(
-                color = (if (dot.bright) accent else base).copy(alpha = alpha),
+                color = base.copy(alpha = alpha.coerceIn(0f, 1f)),
                 radius = dotRadius,
                 center = Offset(
                     x = center.x + x1 * radius,
