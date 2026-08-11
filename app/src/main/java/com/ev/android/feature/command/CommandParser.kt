@@ -78,7 +78,7 @@ object CommandParser {
 
     private val reminderVerbs = listOf(
         "yaad dila do", "yaad dilado", "yaad dila dena", "yaad dila dijiye",
-        "yaad dilana", "yaad dilao", "yaad dila", "yaad karana", "yaad rakhna",
+        "yaad dilana", "bad yad", "yaad dilao", "yaad dila", "yaad karana", "yaad rakhna",
         "reminder laga do", "reminder lagao", "reminder set karo", "reminder",
         "remind me", "remind",
     )
@@ -146,7 +146,7 @@ object CommandParser {
     )
 
     private val typeVerbs = listOf(
-        "type kar do", "type kardo", "type karo", "type kar", "type",
+        "type kar do", "type kardo", "type karo", "type kar", "type", "likho",
     )
 
     /** Only stripped from the START/END of a query so song names stay intact. */
@@ -206,7 +206,7 @@ object CommandParser {
 
     /** "torch on karo AUR whatsapp kholo" \u2014 yahan se do kaam alag hote hain. */
     private val joinRegex =
-        Regex("\\s+(?:aur|phir|fir|uske baad|iske baad|baad me|then|and)\\s+")
+        Regex("\\s+(?:aur|phir|fir|uske baad|uske bad|iske baad|baad me|then|and)\\s+")
 
     // ---------------------------------------------------- media vocabulary
 
