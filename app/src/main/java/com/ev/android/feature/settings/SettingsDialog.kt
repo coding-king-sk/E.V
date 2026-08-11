@@ -25,10 +25,14 @@ import com.ev.android.feature.hud.EvSheet
 import com.ev.android.feature.hud.EvToggleCard
 import com.ev.android.feature.hud.evFieldColors
 import com.ev.android.feature.permissions.PermissionsSection
+import com.ev.android.feature.reminders.Reminders
 import com.ev.android.feature.wakeword.SherpaWakeWord
 import com.ev.android.feature.wakeword.WakeWordModel
 import com.ev.android.ui.theme.EvRed
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * App ki saari settings ek jagah, poori screen pe cards ke roop me.
@@ -49,6 +53,11 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
     var autoSend by remember { mutableStateOf(EvSettings.whatsappAutoSend(context)) }
     var autoType by remember { mutableStateOf(EvSettings.autoType(context)) }
     var aliases by remember { mutableStateOf(EvSettings.aliasesRaw(context)) }
+
+    var reminders by remember { mutableStateOf(Reminders.upcoming(context)) }
+    val exactAlarms = remember { Reminders.canBeExact(context) }
+    val notificationsOff = remember { Reminders.notificationsBlocked(context) }
+    val reminderClock = remember { SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()) }
 
     var offlineWake by remember { mutableStateOf(EvSettings.offlineWakeWord(context)) }
     var modelUrl by remember { mutableStateOf(EvSettings.wakeWordModelUrl(context)) }
@@ -102,6 +111,65 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
             checked = autoType,
             onChange = { autoType = it },
         )
+
+        // ------------------------------------------------------- reminders
+
+        EvSectionHeader("Reminders")
+
+        if (!exactAlarms) {
+            EvCard {
+                Text(
+                    text = "\u26A0 \"Alarms & reminders\" ki permission nahi hai. Reminder " +
+                        "set to ho jayega, par theek waqt pe nahi \u2014 phone ke so jane " +
+                        "par kai minute late baj sakta hai. Upar Permissions me se ise " +
+                        "allow kar do.",
+                    color = EvRed,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+            }
+        }
+
+        if (notificationsOff) {
+            EvCard {
+                Text(
+                    text = "\u26A0 Notifications band hain. Reminder ka waqt aane par E.V " +
+                        "bol to dega, par screen pe kuch nahi dikhega.",
+                    color = EvRed,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+            }
+        }
+
+        if (reminders.isEmpty()) {
+            EvCard {
+                EvCardTitle("Abhi koi reminder nahi")
+                EvCardSubtitle(
+                    "Bol ke lagao: \"kal subah 8 baje yaad dilana ki dawai leni hai\" " +
+                        "ya \"10 minute baad yaad dilana paani peena hai\". Yahan list " +
+                        "me dikhega ki kab bajega \u2014 isse pata chal jata hai ki " +
+                        "reminder set hua ya nahi."
+                )
+            }
+        } else {
+            reminders.forEach { reminder ->
+                EvCard {
+                    EvCardTitle(reminder.text)
+                    EvCardSubtitle(reminderClock.format(Date(reminder.at)))
+
+                    Row(modifier = Modifier.padding(top = 4.dp)) {
+                        EvDialogButton(
+                            label = "Hatao",
+                            onClick = {
+                                Reminders.cancel(context, reminder.id)
+                                reminders = Reminders.upcoming(context)
+                            },
+                        )
+                    }
+                }
+            }
+        }
 
         EvSectionHeader("Naam ki galtiyan (aliases)")
 
