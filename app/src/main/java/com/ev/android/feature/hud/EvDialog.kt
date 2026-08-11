@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -48,11 +50,11 @@ import com.ev.android.ui.theme.EvTextPrimary
  * App ke HUD theme wale dialog aur cards.
  *
  * Ye sab ek jagah isliye hain ki Settings, API key aur permissions teeno ek
- * jaise dikhein — pehle har screen apna alag Material default use kar rahi thi
+ * jaise dikhein \u2014 pehle har screen apna alag Material default use kar rahi thi
  * aur isi wajah se app ke andar do alag design dikh rahe the.
  */
 
-/** Poori screen ka settings page — chhote dialog me itni cheezein nahi samati. */
+/** Poori screen ka settings page \u2014 chhote dialog me itni cheezein nahi samati. */
 @Composable
 fun EvSheet(
     title: String,
@@ -124,7 +126,7 @@ fun EvDialog(
     )
 }
 
-/** "MESSAGING", "PERMISSIONS" — cards ke upar wala chhota label. */
+/** "MESSAGING", "PERMISSIONS" \u2014 cards ke upar wala chhota label. */
 @Composable
 fun EvSectionHeader(text: String, modifier: Modifier = Modifier) {
     Text(
@@ -214,6 +216,7 @@ fun EvActionCard(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp,
+                    maxLines = 1,
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(onClick = onClick)
@@ -280,11 +283,20 @@ fun EvDialogHint(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * HUD wala flat button.
+ *
+ * [maxLines] = 1 jaan-boojh ke fix hai: jagah kam padne par pehle iska text do
+ * ya teen lines me tut jata tha, jisse screen pe bada khali hissa ban jata tha.
+ * Ab chaudai kam ho to text chhota ho ke "\u2026" me chala jata hai, layout nahi
+ * bigadta.
+ */
 @Composable
 fun EvDialogButton(
     label: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    textAlign: TextAlign? = null,
     modifier: Modifier = Modifier,
 ) {
     Text(
@@ -293,6 +305,9 @@ fun EvDialogButton(
         fontSize = 13.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 1.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = textAlign,
         modifier = modifier
             .padding(horizontal = 4.dp)
             .clip(RoundedCornerShape(10.dp))
