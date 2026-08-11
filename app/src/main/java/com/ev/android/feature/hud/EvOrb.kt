@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import com.ev.android.feature.voice.MicLevel
 import kotlin.math.PI
@@ -24,19 +25,19 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Ek dot se bana ghoomta hua globe \u2014 E.V ka chehra.
+ * E.V ka chehra.
  *
- * Design reference se teen cheezein aati hain:
- *  1. Dots latitude ki seedhi lines me hain (bikhre hue nahi).
- *  2. Beech me sirf EK chamakti hui line hai \u2014 equator.
- *  3. Poora orb ek hi rang ka hai.
+ * Teen shakl ho sakti hain (dekho [OrbShape]):
+ *  - GLOBE: dots se bana ghoomta globe \u2014 reference design.
+ *  - RING: sirf beech wali chamakti line.
+ *  - BALL: ek solid chamakta gola.
  *
- * Bolte waqt wahi beech wali line awaaz ke saath lehrati hai. Wave dots ki
+ * Bolte waqt beech wali line awaaz ke saath lehrati hai. Wave dots ki
  * **jagah** hilata hai, unki ginti ya motai nahi \u2014 isliye chup hote hi line
  * wapas bilkul seedhi ho jati hai aur design wahi ka wahi rehta hai.
  *
- * Ab har cheez [OrbStyle] se aati hai, code me fix nahi hai \u2014 user orb pe tap
- * karke ise khud badal sakta hai.
+ * Har cheez [OrbStyle] se aati hai, code me fix nahi hai \u2014 user orb pe double
+ * tap karke ise khud badal sakta hai.
  */
 private class OrbDot(
     val x: Float,
@@ -77,46 +78,50 @@ private fun ringAt(
  * hazaaron dots har frame banana bekaar ka kaam hota.
  */
 private fun buildSphere(style: OrbStyle): List<OrbDot> {
-    val rows = style.rows.coerceIn(12, 80)
-    val equatorDots = style.density.coerceIn(16, 120)
+    // Solid gola dots se nahi banta \u2014 wo seedha Canvas pe draw hota hai.
+    if (style.shape == OrbShape.BALL) return emptyList()
 
+    val equatorDots = style.density.coerceIn(16, 120)
     val dots = ArrayList<OrbDot>(2200)
 
-    for (row in 0 until rows) {
-        val theta = PI * (row + 0.5) / rows
-        val y = cos(theta).toFloat()
-        val radius = sin(theta).toFloat()
-        val count = max(6, (equatorDots * radius).roundToInt())
+    if (style.shape == OrbShape.GLOBE) {
+        val rows = style.rows.coerceIn(12, 80)
+        for (row in 0 until rows) {
+            val theta = PI * (row + 0.5) / rows
+            val y = cos(theta).toFloat()
+            val radius = sin(theta).toFloat()
+            val count = max(6, (equatorDots * radius).roundToInt())
 
-        for (i in 0 until count) {
-            val angle = 2.0 * PI * i / count
-            dots.add(
-                OrbDot(
-                    x = (radius * cos(angle)).toFloat(),
-                    y = y,
-                    z = (radius * sin(angle)).toFloat(),
-                    bright = false,
-                    equator = false,
-                    phase = angle.toFloat(),
+            for (i in 0 until count) {
+                val angle = 2.0 * PI * i / count
+                dots.add(
+                    OrbDot(
+                        x = (radius * cos(angle)).toFloat(),
+                        y = y,
+                        z = (radius * sin(angle)).toFloat(),
+                        bright = false,
+                        equator = false,
+                        phase = angle.toFloat(),
+                    )
                 )
-            )
+            }
         }
     }
 
     // Beech me sirf ek line. Dots thode zyada rakhe hain taaki wo ek theek
-    // se chamakti hui lakeer bane, na ki moti patti.
-    if (style.equatorLine) {
-        ringAt(
-            y = 0f,
-            count = max(48, (equatorDots * 2.35f).roundToInt()),
-            bright = true,
-            equator = true,
-            into = dots,
-        )
+    // se chamakti hui lakeer bane, na ki moti patti. RING shakl me to yahi
+    // poora orb hai, isliye wahan aur ghane dots.
+    if (style.equatorLine || style.shape == OrbShape.RING) {
+        val count = if (style.shape == OrbShape.RING) {
+            max(90, (equatorDots * 3.2f).roundToInt())
+        } else {
+            max(48, (equatorDots * 2.35f).roundToInt())
+        }
+        ringAt(y = 0f, count = count, bright = true, equator = true, into = dots)
     }
 
     // Poles ke paas ek-ek halki ring \u2014 inhi se sphere jhuka hua dikhta hai.
-    if (style.poleRings) {
+    if (style.poleRings && style.shape == OrbShape.GLOBE) {
         for (y in listOf(0.9f, -0.9f)) {
             val radius = sqrt((1f - y * y).coerceAtLeast(0f))
             ringAt(
@@ -140,7 +145,13 @@ fun EvOrb(
     style: OrbStyle = OrbStyle(),
     modifier: Modifier = Modifier,
 ) {
-    val dots = remember(style.rows, style.density, style.equatorLine, style.poleRings) {
+    val dots = remember(
+        style.shape,
+        style.rows,
+        style.density,
+        style.equatorLine,
+        style.poleRings,
+    ) {
         buildSphere(style)
     }
 
@@ -205,6 +216,25 @@ fun EvOrb(
 
         // Mic on hone ka ishara: sirf chamak badhti hai, rang wahi rehta hai.
         val boost = if (active) 1.18f else 1f
+
+        // Solid gola: beech me poora rang, kinaare pe ghulta hua.
+        if (style.shape == OrbShape.BALL) {
+            val ballRadius = radius * (1.02f + amplitude * 0.08f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        base.copy(alpha = (0.95f * fade * boost).coerceIn(0f, 1f)),
+                        base.copy(alpha = (0.40f * fade * style.glow).coerceIn(0f, 1f)),
+                        Color.Transparent,
+                    ),
+                    center = center,
+                    radius = ballRadius,
+                ),
+                radius = ballRadius,
+                center = center,
+            )
+            return@Canvas
+        }
 
         // Peeche ki halki roshni \u2014 orb kaale background pe tairta hua lagta hai.
         val halo = ((0.05f + amplitude * 0.05f) * fade * boost * style.glow)

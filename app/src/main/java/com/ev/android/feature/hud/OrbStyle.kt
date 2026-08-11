@@ -3,11 +3,20 @@ package com.ev.android.feature.hud
 import android.content.Context
 
 /**
+ * Orb kis shakl ka hai.
+ *
+ * GLOBE = dots se bana ghoomta globe (default, reference design).
+ * RING  = sirf beech wali chamakti line \u2014 globe ke bina, bolte waqt lehrati hai.
+ * BALL  = ek solid chamakta gola, bina dots ke.
+ */
+enum class OrbShape { GLOBE, RING, BALL }
+
+/**
  * Orb ka poora design, ek jagah.
  *
  * Pehle ye sab file ke andar `const val` the \u2014 badalna ho to code badalna
  * padta tha. Ab har cheez yahan hai aur user khud app ke andar se badal sakta
- * hai (orb pe tap karke).
+ * hai (orb pe double tap karke).
  *
  * Har value ki apni hadd hai. Bahut zyada dots pe phone garam hota hai aur
  * bahut kam pe globe jaali jaisa lagta hai, isliye slider ki seemaayein jaan
@@ -16,6 +25,8 @@ import android.content.Context
 data class OrbStyle(
     /** Dots ka rang (ARGB). */
     val colorArgb: Long = 0xFFEFF4F6,
+    /** Orb ki shakl. */
+    val shape: OrbShape = OrbShape.GLOBE,
     /** Screen pe orb kitna bada dikhega. */
     val sizeDp: Int = 250,
     /** Kitni latitude lines. */
@@ -63,8 +74,10 @@ object OrbStyleStore {
 
     fun load(context: Context): OrbStyle {
         val p = prefs(context)
+        val shapeName = p.getString("shape", DEFAULT.shape.name) ?: DEFAULT.shape.name
         return OrbStyle(
             colorArgb = p.getLong("color", DEFAULT.colorArgb),
+            shape = runCatching { OrbShape.valueOf(shapeName) }.getOrDefault(DEFAULT.shape),
             sizeDp = p.getInt("size", DEFAULT.sizeDp).coerceIn(140, 340),
             rows = p.getInt("rows", DEFAULT.rows).coerceIn(12, 80),
             density = p.getInt("density", DEFAULT.density).coerceIn(16, 120),
@@ -83,6 +96,7 @@ object OrbStyleStore {
     fun save(context: Context, style: OrbStyle) {
         prefs(context).edit()
             .putLong("color", style.colorArgb)
+            .putString("shape", style.shape.name)
             .putInt("size", style.sizeDp)
             .putInt("rows", style.rows)
             .putInt("density", style.density)

@@ -11,10 +11,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,15 +29,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ev.android.ui.theme.EvGreen
 import com.ev.android.ui.theme.EvOutline
+import com.ev.android.ui.theme.EvSurfaceHigh
 import com.ev.android.ui.theme.EvTextMuted
+import com.ev.android.ui.theme.EvTextPrimary
 import kotlin.math.roundToInt
 
 /**
- * Orb pe tap karne se khulne wala editor.
+ * Orb pe double tap karne se khulne wala poora page.
  *
  * Upar asli orb dikhta hai (koi alag preview nahi \u2014 wahi component hai), aur
- * neeche har cheez ka slider. Har badlav turant dikhta hai aur turant phone me
- * save ho jata hai; "Save" dabana yaad rakhna na pade.
+ * neeche har cheez ka control. Har badlav turant dikhta hai aur turant phone
+ * me save ho jata hai; "Save" dabana yaad rakhna na pade.
  */
 @Composable
 fun OrbEditorPanel(
@@ -40,6 +48,10 @@ fun OrbEditorPanel(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Hex box me jo likha hai wo alag se yaad rakhna padta hai, warna aadha
+    // type karte hi (jab tak rang bana nahi) box khud ko mita deta.
+    var hex by remember { mutableStateOf(toHex(style.colorArgb)) }
+
     EvPanel(title = "Orb design", onClose = onClose, modifier = modifier) {
 
         Box(
@@ -63,6 +75,27 @@ fun OrbEditorPanel(
             fontSize = 12.sp,
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
         )
+
+        EvSectionHeader("Shakl")
+
+        EvCard {
+            EvCardSubtitle(
+                "Globe = dots wala ghoomta gola. Ring = sirf beech wali lehrati line. " +
+                    "Ball = ek solid chamakta gola."
+            )
+
+            Row(modifier = Modifier.padding(top = 12.dp)) {
+                ShapeChip("Globe", style.shape == OrbShape.GLOBE) {
+                    onChange(style.copy(shape = OrbShape.GLOBE))
+                }
+                ShapeChip("Ring", style.shape == OrbShape.RING) {
+                    onChange(style.copy(shape = OrbShape.RING))
+                }
+                ShapeChip("Ball", style.shape == OrbShape.BALL) {
+                    onChange(style.copy(shape = OrbShape.BALL))
+                }
+            }
+        }
 
         EvSectionHeader("Rang")
 
@@ -88,13 +121,45 @@ fun OrbEditorPanel(
                                 color = if (selected) EvGreen else EvOutline,
                                 shape = CircleShape,
                             )
-                            .clickable { onChange(style.copy(colorArgb = argb)) },
+                            .clickable {
+                                hex = toHex(argb)
+                                onChange(style.copy(colorArgb = argb))
+                            },
                     )
                 }
             }
         }
 
-        EvSectionHeader("Shakl")
+        EvCard {
+            EvCardTitle("Apna rang (hex)")
+            EvCardSubtitle("Jaise #00E5FF ya #FF00E5FF. 6 aur 8 digit dono chalte hain.")
+
+            OutlinedTextField(
+                value = hex,
+                onValueChange = { typed ->
+                    hex = typed
+                    val parsed = parseHex(typed)
+                    if (parsed != null) onChange(style.copy(colorArgb = parsed))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                placeholder = { Text("#00E5FF", color = EvTextMuted, fontSize = 14.sp) },
+                colors = evFieldColors(),
+            )
+
+            Text(
+                text = if (parseHex(hex) == null) "Abhi ye hex sahi nahi hai"
+                else "Rang lag gaya",
+                color = if (parseHex(hex) == null) EvTextMuted else EvGreen,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        EvSectionHeader("Size")
 
         OrbSlider(
             label = "Size",
@@ -200,12 +265,39 @@ fun OrbEditorPanel(
             Row(modifier = Modifier.padding(top = 4.dp)) {
                 EvDialogButton(
                     label = "Reset karo",
-                    onClick = { onChange(OrbStyleStore.DEFAULT) },
+                    onClick = {
+                        hex = toHex(OrbStyleStore.DEFAULT.colorArgb)
+                        onChange(OrbStyleStore.DEFAULT)
+                    },
                 )
             }
         }
 
         EvGap(32)
+    }
+}
+
+@Composable
+private fun ShapeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .padding(end = 10.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(EvSurfaceHigh)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) EvGreen else EvOutline,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = label.uppercase(),
+            color = if (selected) EvGreen else EvTextPrimary,
+            fontSize = 12.sp,
+            letterSpacing = 1.sp,
+        )
     }
 }
 
@@ -234,6 +326,23 @@ private fun OrbSlider(
             ),
         )
     }
+}
+
+/** "#FF00E5FF" \u2014 aisa hi text hex box me dikhta hai. */
+private fun toHex(argb: Long): String {
+    val raw = java.lang.Long.toHexString(argb)
+    val padded = ("00000000" + raw).takeLast(8)
+    return "#" + padded.uppercase()
+}
+
+/** "#00E5FF" ya "#FF00E5FF" \u2014 dono chalte hain. Galat ho to null. */
+private fun parseHex(raw: String): Long? {
+    var clean = raw.trim().removePrefix("#")
+    if (clean.startsWith("0x") || clean.startsWith("0X")) clean = clean.substring(2)
+    if (clean.length != 6 && clean.length != 8) return null
+    val value = clean.toLongOrNull(16) ?: return null
+    // 6 digit me alpha nahi hota \u2014 poora opaque maan lo.
+    return if (clean.length == 6) value or 0xFF000000L else value
 }
 
 /** "1.4" \u2014 String.format se bacha hai kyunki wo locale pe alag chalta hai. */

@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -117,9 +119,9 @@ private val tabs = listOf(TAB_COMMAND, TAB_NOTES, TAB_GALLERY, TAB_HISTORY)
  * E.V ki main screen \u2014 HUD look.
  *
  * Beech me sirf orb rehta hai, jo batata hai E.V so raha hai, sun raha hai ya
- * soch raha hai. Settings aur orb editor bhi isi beech wale hisse me khulte
- * hain \u2014 alag screen nahi, taaki header, tabs aur command box hamesha ek hi
- * jagah rahein.
+ * soch raha hai. Settings aur orb editor poore page hain \u2014 khulte hi home
+ * screen (header, tabs, command box) chhup jaati hai, taaki lamba content
+ * chhoti khidki me na thusa lage. Back arrow se wapas.
  */
 @Composable
 fun LauncherScreen(modifier: Modifier = Modifier) {
@@ -424,7 +426,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         if (wasHandsFree) EvListeningService.stop(context)
         handsFreePaused = wasHandsFree
 
-        // Bolte waqt orb dikhna chahiye \u2014 panel khula ho to band kar dete hain.
+        // Bolte waqt orb dikhna chahiye \u2014 koi page khula ho to band kar dete hain.
         showSettings = false
         showOrbEditor = false
 
@@ -459,168 +461,172 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxSize(),
         containerColor = EvBlack,
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .padding(innerPadding),
         ) {
-            HudHeader(
-                networkOnline = true,
-                onSettings = {
-                    showOrbEditor = false
-                    showSettings = !showSettings
-                },
-                modifier = Modifier.padding(top = 10.dp),
-            )
-
-            Spacer(modifier = Modifier.size(16.dp))
-
-            HudTabs(
-                tabs = tabs,
-                selected = tab,
-                onSelect = {
-                    tab = it
-                    showSettings = false
-                    showOrbEditor = false
-                },
-            )
-
-            Spacer(modifier = Modifier.size(12.dp))
-
-            HudStatusRow(
-                micOn = handsFree,
-                coreActive = true,
-                apiKeySet = apiKeySet,
-                onMicClick = { toggleHandsFree() },
-                onApiKeyClick = { showApiKey = true },
-            )
-
-            if (busy) {
-                LinearProgressIndicator(
-                    color = EvGreen,
-                    trackColor = EvSurfaceHigh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
+            when {
+                // Poore page \u2014 inke khulte hi home screen chhup jaati hai.
+                showSettings -> SettingsPanel(
+                    onClose = {
+                        showSettings = false
+                        apiKeySet = EvSettings.hasApiKey(context)
+                    },
+                    onSaved = {
+                        apiKeySet = EvSettings.hasApiKey(context)
+                        notify(it)
+                    },
                 )
-            }
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                when {
-                    showSettings -> SettingsPanel(
-                        onClose = {
-                            showSettings = false
-                            apiKeySet = EvSettings.hasApiKey(context)
+                showOrbEditor -> OrbEditorPanel(
+                    style = orbStyle,
+                    onChange = { updated ->
+                        orbStyle = updated
+                        OrbStyleStore.save(context, updated)
+                    },
+                    onClose = { showOrbEditor = false },
+                )
+
+                else -> Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    HudHeader(
+                        networkOnline = true,
+                        onSettings = {
+                            showOrbEditor = false
+                            showSettings = true
                         },
-                        onSaved = {
-                            apiKeySet = EvSettings.hasApiKey(context)
-                            notify(it)
-                        },
+                        modifier = Modifier.padding(top = 10.dp),
                     )
 
-                    showOrbEditor -> OrbEditorPanel(
-                        style = orbStyle,
-                        onChange = { updated ->
-                            orbStyle = updated
-                            OrbStyleStore.save(context, updated)
-                        },
-                        onClose = { showOrbEditor = false },
+                    Spacer(modifier = Modifier.size(16.dp))
+
+                    HudTabs(
+                        tabs = tabs,
+                        selected = tab,
+                        onSelect = { tab = it },
                     )
 
-                    tab == TAB_COMMAND -> CommandPane(
-                        listening = listening,
+                    Spacer(modifier = Modifier.size(12.dp))
+
+                    HudStatusRow(
+                        micOn = handsFree,
+                        coreActive = true,
+                        apiKeySet = apiKeySet,
+                        onMicClick = { toggleHandsFree() },
+                        onApiKeyClick = { showApiKey = true },
+                    )
+
+                    if (busy) {
+                        LinearProgressIndicator(
+                            color = EvGreen,
+                            trackColor = EvSurfaceHigh,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp),
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    ) {
+                        when (tab) {
+                            TAB_COMMAND -> CommandPane(
+                                listening = listening,
+                                busy = busy,
+                                status = status,
+                                orbStyle = orbStyle,
+                                onOrbTap = { showOrbEditor = true },
+                            )
+
+                            TAB_NOTES -> NotesPane(
+                                notes = Notes.items,
+                                onAdd = { text ->
+                                    Notes.add(context, text)
+                                    notify("Note save ho gaya")
+                                },
+                                onDelete = { note -> Notes.remove(context, note) },
+                            )
+
+                            TAB_GALLERY -> GalleryPane(
+                                items = gallery,
+                                loading = galleryLoading,
+                                onOpen = { item -> EvGallery.open(context, item) },
+                            )
+
+                            else -> HistoryPane(
+                                entries = CommandHistory.entries,
+                                onRepeat = { entry -> runCommand(entry.spoken) },
+                                onClear = {
+                                    CommandHistory.clear(context)
+                                    notify("History saaf kar di")
+                                },
+                            )
+                        }
+                    }
+
+                    HudActionBar(
                         busy = busy,
-                        status = status,
-                        orbStyle = orbStyle,
-                        onOrbTap = { showOrbEditor = true },
-                    )
-
-                    tab == TAB_NOTES -> NotesPane(
-                        notes = Notes.items,
-                        onAdd = { text ->
-                            Notes.add(context, text)
-                            notify("Note save ho gaya")
+                        listening = listening,
+                        onCamera = { handle(EvCommand.TakePhoto(front = false)) },
+                        onStop = {
+                            Speaker.stop()
+                            listening = false
+                            resumeHandsFree()
+                            status = "READY \u2014 BOLO YA LIKHO"
                         },
-                        onDelete = { note -> Notes.remove(context, note) },
+                        onMic = { startListening() },
+                        modifier = Modifier.padding(bottom = 10.dp),
                     )
 
-                    tab == TAB_GALLERY -> GalleryPane(
-                        items = gallery,
-                        loading = galleryLoading,
-                        onOpen = { item -> EvGallery.open(context, item) },
-                    )
-
-                    else -> HistoryPane(
-                        entries = CommandHistory.entries,
-                        onRepeat = { entry -> runCommand(entry.spoken) },
-                        onClear = {
-                            CommandHistory.clear(context)
-                            notify("History saaf kar di")
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        placeholder = {
+                            Text("type a command\u2026", color = EvTextMuted, fontSize = 15.sp)
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = EvTextPrimary,
+                            unfocusedTextColor = EvTextPrimary,
+                            focusedBorderColor = EvGreen,
+                            unfocusedBorderColor = EvOutline,
+                            cursorColor = EvGreen,
+                            focusedContainerColor = EvSurfaceHigh,
+                            unfocusedContainerColor = EvSurfaceHigh,
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { runCommand(input) }),
+                        trailingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable(enabled = input.isNotBlank() && !busy) {
+                                        runCommand(input)
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "\u2192",
+                                    color = if (input.isNotBlank()) EvGreen else EvTextMuted,
+                                    fontSize = 22.sp,
+                                )
+                            }
                         },
                     )
                 }
             }
-
-            HudActionBar(
-                busy = busy,
-                listening = listening,
-                onCamera = { handle(EvCommand.TakePhoto(front = false)) },
-                onStop = {
-                    Speaker.stop()
-                    listening = false
-                    resumeHandsFree()
-                    status = "READY \u2014 BOLO YA LIKHO"
-                },
-                onMic = { startListening() },
-                modifier = Modifier.padding(bottom = 10.dp),
-            )
-
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                placeholder = {
-                    Text("type a command\u2026", color = EvTextMuted, fontSize = 15.sp)
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = EvTextPrimary,
-                    unfocusedTextColor = EvTextPrimary,
-                    focusedBorderColor = EvGreen,
-                    unfocusedBorderColor = EvOutline,
-                    cursorColor = EvGreen,
-                    focusedContainerColor = EvSurfaceHigh,
-                    unfocusedContainerColor = EvSurfaceHigh,
-                ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { runCommand(input) }),
-                trailingIcon = {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable(enabled = input.isNotBlank() && !busy) {
-                                runCommand(input)
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = "\u2192",
-                            color = if (input.isNotBlank()) EvGreen else EvTextMuted,
-                            fontSize = 22.sp,
-                        )
-                    }
-                },
-            )
         }
     }
 
@@ -641,9 +647,9 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 /**
  * Beech wala shaant sa screen \u2014 sirf orb aur ek line status.
  *
- * Orb pe tap karne se uska design editor khulta hai (rang, size, dots, lehar
- * waghairah) \u2014 isi liye neeche ek chhota sa ishara likha hai, warna kisi ko
- * pata hi nahi chalta ki orb tap bhi hota hai.
+ * Orb pe **double tap** karne se uska design page khulta hai (rang, shakl,
+ * size, lehar waghairah). Single tap jaan boojh ke kuch nahi karta \u2014 orb bada
+ * hai, chalte-phirte galti se chhoo jaana aam baat hai.
  */
 @Composable
 private fun CommandPane(
@@ -663,7 +669,9 @@ private fun CommandPane(
             modifier = Modifier
                 .size(orbStyle.sizeDp.dp)
                 .clip(CircleShape)
-                .clickable(onClick = onOrbTap),
+                .pointerInput(Unit) {
+                    detectTapGestures(onDoubleTap = { onOrbTap() })
+                },
             contentAlignment = Alignment.Center,
         ) {
             EvOrb(
@@ -688,7 +696,7 @@ private fun CommandPane(
         )
 
         Text(
-            text = "ORB PE TAP KARO \u2192 DESIGN BADLO",
+            text = "ORB PE DOUBLE TAP \u2192 DESIGN BADLO",
             color = EvTextMuted,
             fontSize = 10.sp,
             letterSpacing = 1.5.sp,
