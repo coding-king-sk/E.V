@@ -49,11 +49,17 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!--
-        Reminders. SCHEDULE_EXACT_ALARM Android 12+ pe user se maanga jata hai;
-        na mile to E.V inexact alarm pe fallback kar leta hai.
+        Reminders.
+        USE_EXACT_ALARM Android 13+ pe khud mil jati hai \u2014 user ko Settings me
+        jaane ki zaroorat nahi. SCHEDULE_EXACT_ALARM Android 12 ke liye hai.
+        Waise bhi ab reminders setAlarmClock se lagte hain, jise permission
+        chahiye hi nahi.
         RECEIVE_BOOT_COMPLETED isliye ki reboot ke baad pending reminders
         dobara set ho jayein \u2014 Android reboot pe saare alarms bhool jata hai.
     -->
+    <uses-permission
+        android:name="android.permission.USE_EXACT_ALARM"
+        tools:ignore="UseExactAlarmPermission" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
