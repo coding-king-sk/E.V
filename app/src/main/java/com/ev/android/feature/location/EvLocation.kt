@@ -23,7 +23,7 @@ import java.util.Locale
  */
 object EvLocation {
 
-    /** Isse purani location ko "purani" bol ke batate hain. */
+    /** Isse purani location ko \"purani\" bol ke batate hain. */
     private const val STALE_AFTER_MS = 10 * 60 * 1000L
 
     suspend fun describe(context: Context): String = withContext(Dispatchers.IO) {
@@ -51,6 +51,34 @@ object EvLocation {
         } else {
             "Aap yahan ho: $where"
         }
+    }
+
+    /**
+     * Sirf lat/long \u2014 mausam jaise features ke liye.
+     *
+     * Ye blocking hai (disk aur system service padhta hai), isliye ise IO
+     * thread se hi bulana.
+     */
+    fun coordinates(context: Context): Pair<Double, Double>? {
+        if (!hasPermission(context)) return null
+        val location = lastKnown(context) ?: return null
+        return location.latitude to location.longitude
+    }
+
+    /**
+     * Sirf shehar/mohalle ka naam, poora pata nahi.
+     *
+     * Mausam bataate waqt \"Indore me abhi 31\u00B0\" bolna accha lagta hai. Naam na
+     * mile to null \u2014 tab bina jagah ke hi jawab chala jata hai.
+     */
+    fun shortPlace(context: Context): String? {
+        if (!hasPermission(context)) return null
+        val location = lastKnown(context) ?: return null
+        return addressOf(context, location)
+            ?.split(",")
+            ?.firstOrNull()
+            ?.trim()
+            ?.ifBlank { null }
     }
 
     private fun hasPermission(context: Context): Boolean =

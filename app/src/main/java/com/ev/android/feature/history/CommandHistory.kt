@@ -114,6 +114,11 @@ object CommandHistory {
         is EvCommand.Note -> "Note: " + command.text
         is EvCommand.Info -> "Sawaal: " + command.kind.name
         EvCommand.WhereAmI -> "Meri location"
+        is EvCommand.Weather -> when (command.dayOffset) {
+            0 -> "Mausam: aaj"
+            1 -> "Mausam: kal"
+            else -> "Mausam: parso"
+        }
         is EvCommand.Calculate -> "Hisaab: " + command.expression
         is EvCommand.TakePhoto -> if (command.front) "Selfie" else "Photo"
         is EvCommand.RecordVideo -> "Video: " + command.seconds + " second"
