@@ -28,8 +28,9 @@ data class EvPermission(
 /**
  * Saari permissions ek jagah.
  *
- * Pehle ye list teen jagah bikhri hui thi (manifest, onboarding, launcher) aur
- * teeno alag alag thi. Ab manifest ke alawa sirf yahi ek source hai.
+ * Yahan sirf wahi permissions hain jinke peeche app ka koi asli feature hai.
+ * Storage wali pehle list me thi — wo sirf Android 9 aur usse purane pe lagti
+ * thi, isliye nikal di gayi.
  */
 object AppPermissions {
 
@@ -55,8 +56,7 @@ object AppPermissions {
         EvPermission(
             permission = Manifest.permission.READ_CONTACTS,
             label = "Contacts",
-            why = "\"Rehan ko call lagao\" me naam se number dhoondhne ke liye. " +
-                "Na do to naam wale command kaam nahi karenge.",
+            why = "\"Rehan ko call lagao\" me naam se number dhoondhne ke liye.",
         ),
         EvPermission(
             permission = Manifest.permission.SEND_SMS,
@@ -69,13 +69,6 @@ object AppPermissions {
             label = "Call lagana",
             why = "Na do to bhi chalega \u2014 E.V dialer me number bhar dega, call " +
                 "button aapko dabana padega.",
-        ),
-        EvPermission(
-            permission = Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            label = "Storage",
-            why = "Sirf purane Android (9 aur usse neeche) pe photo gallery me save " +
-                "karne ke liye. Naye phones me iski zaroorat nahi.",
-            maxSdk = Build.VERSION_CODES.P,
         ),
     )
 
@@ -97,8 +90,8 @@ object AppPermissions {
     // ------------------------------------------------- special (settings wali)
 
     /**
-     * Ye chaar cheezein normal permission dialog se nahi milti \u2014 har ek ke
-     * liye Android ki alag screen kholni padti hai.
+     * Ye cheezein normal permission dialog se nahi milti \u2014 har ek ke liye
+     * Android ki alag screen kholni padti hai.
      */
     fun batteryUnrestricted(context: Context): Boolean {
         val power = context.getSystemService(PowerManager::class.java) ?: return false

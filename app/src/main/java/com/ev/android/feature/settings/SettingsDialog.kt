@@ -1,13 +1,8 @@
 package com.ev.android.feature.settings
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,37 +11,37 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ev.android.feature.hud.EvDialog
+import com.ev.android.feature.hud.EvCard
+import com.ev.android.feature.hud.EvCardSubtitle
+import com.ev.android.feature.hud.EvCardTitle
 import com.ev.android.feature.hud.EvDialogButton
-import com.ev.android.feature.hud.EvDialogHint
-import com.ev.android.feature.hud.EvDialogTitle
-import com.ev.android.feature.hud.EvSwitch
+import com.ev.android.feature.hud.EvGap
+import com.ev.android.feature.hud.EvSectionHeader
+import com.ev.android.feature.hud.EvSheet
+import com.ev.android.feature.hud.EvToggleCard
 import com.ev.android.feature.hud.evFieldColors
 import com.ev.android.feature.permissions.PermissionsSection
 import com.ev.android.feature.wakeword.SherpaWakeWord
 import com.ev.android.feature.wakeword.WakeWordModel
-import com.ev.android.ui.theme.EvOutline
 import com.ev.android.ui.theme.EvRed
-import com.ev.android.ui.theme.EvTextPrimary
 import kotlinx.coroutines.launch
 
 /**
- * App ki saari settings ek jagah.
+ * App ki saari settings ek jagah, poori screen pe cards ke roop me.
  *
- * API key yahin paste hoti hai aur phone me hi rehti hai \u2014 isi wajah se key
- * repo me daalne ki zaroorat nahi padti.
+ * Groq API key ka field yahan jaan-boojh ke nahi hai — wo home screen ke
+ * API KEY button me hai. Ek hi cheez do jagah rakhne se ye confusion hota tha
+ * ki kaunsi wali asli hai.
  */
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var key by remember { mutableStateOf(EvSettings.apiKey(context)) }
     var aiOn by remember { mutableStateOf(EvSettings.aiEnabled(context)) }
     var personalOn by remember { mutableStateOf(EvSettings.sendPersonalToAi(context)) }
     var whisperOn by remember { mutableStateOf(EvSettings.whisperStt(context)) }
@@ -60,11 +55,10 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
 
     val libraryOk = remember { SherpaWakeWord.isLibraryAvailable() }
 
-    EvDialog(
+    EvSheet(
         title = "Settings",
         onDismiss = onDismiss,
-        onConfirm = {
-            EvSettings.setApiKey(context, key)
+        onSave = {
             EvSettings.setAiEnabled(context, aiOn)
             EvSettings.setSendPersonalToAi(context, personalOn)
             EvSettings.setWhisperStt(context, whisperOn)
@@ -72,126 +66,84 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
             EvSettings.setWakeWordModelUrl(context, modelUrl)
             EvSettings.setWakeWordKeywords(context, keywords)
             onSaved(
-                if (EvSettings.aiEnabled(context)) "AI fallback chalu hai"
-                else "AI fallback band hai"
+                if (aiOn) "AI fallback chalu hai" else "AI fallback band hai"
             )
             onDismiss()
         },
     ) {
-        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
 
-            // Onboarding hat gaya hai, isliye permissions ka poora hisaab ab
-            // yahan sabse upar hai \u2014 typing/auto-send wali accessibility bhi
-            // isi list me hai, home screen pe ab wo button nahi.
-            PermissionsSection()
+        // Onboarding hat gaya hai, isliye permissions ka poora hisaab ab yahan
+        // sabse upar hai — typing/auto-send wali accessibility bhi isi list me.
+        EvSectionHeader("Permissions")
+        PermissionsSection()
 
-            Divider()
+        EvSectionHeader("AI")
 
-            EvDialogTitle("AI (Groq)")
+        EvToggleCard(
+            title = "AI fallback",
+            subtitle = "Jo command E.V khud na samajh paye wahi Groq ko jata hai. " +
+                "Key home screen ke API KEY button me daalni hai.",
+            checked = aiOn,
+            onChange = { aiOn = it },
+        )
 
-            EvDialogHint(
-                text = "Jo command E.V khud na samajh paye, wahi AI ko bheja jayega. " +
-                    "Baaki sab pehle jaisa offline hi chalega.",
-                modifier = Modifier.padding(top = 4.dp),
-            )
+        EvToggleCard(
+            title = "Message/call ka text bhi AI ko bhejo",
+            subtitle = "Ye off rakhna behtar hai. In commands me contact ka naam aur " +
+                "message ka text hota hai, aur free tier pe providers prompts ko " +
+                "training me use kar sakte hain.",
+            checked = personalOn,
+            onChange = { personalOn = it },
+        )
 
-            OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                singleLine = true,
-                label = { Text("Groq API key") },
-                placeholder = { Text("gsk_...") },
-                colors = evFieldColors(),
-            )
+        EvSectionHeader("Sunna (speech to text)")
 
-            EvDialogHint(
-                text = "console.groq.com/keys se free milti hai. Key sirf is phone " +
-                    "me save hoti hai.",
-                modifier = Modifier.padding(top = 4.dp),
-            )
+        EvToggleCard(
+            title = "Mic pe Whisper (Groq)",
+            subtitle = "Whisper Hinglish kaafi behtar samajhta hai, par aapki awaaz " +
+                "Groq ke server pe jaati hai aur internet chahiye. Sirf mic button " +
+                "pe lagta hai, \"Hey E.V\" pe nahi.",
+            checked = whisperOn,
+            onChange = { whisperOn = it },
+        )
 
-            SettingRow(
-                label = "AI fallback on",
-                checked = aiOn,
-                onChange = { aiOn = it },
-            )
+        EvSectionHeader("Offline wake word")
 
-            SettingRow(
-                label = "Message/call ka text bhi AI ko bhejo",
-                checked = personalOn,
-                onChange = { personalOn = it },
-            )
-
-            EvDialogHint(
-                text = "Ye off rakhna behtar hai. In commands me contact ka naam aur " +
-                    "message ka text hota hai, aur free tier pe providers prompts ko " +
-                    "training ke liye use kar sakte hain.",
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            Divider()
-
-            EvDialogTitle("Sunna (speech to text)")
-
-            SettingRow(
-                label = "Mic pe Whisper (Groq) use karo",
-                checked = whisperOn,
-                onChange = { whisperOn = it },
-            )
-
-            EvDialogHint(
-                text = "Whisper Hinglish kaafi behtar samajhta hai. Lekin isme aapki " +
-                    "awaaz Groq ke server pe jaati hai aur internet chahiye \u2014 " +
-                    "bina internet ke mic Google recognizer pe hi chalega. Ye sirf " +
-                    "mic button pe lagta hai, hands-free \"Hey E.V\" pe nahi.",
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            Divider()
-
-            EvDialogTitle("Offline wake word")
-
-            EvDialogHint(
-                text = "Wake word phone ke andar hi pakda jayega, internet ke bina " +
-                    "aur bina awaaz kahin bheje. Iske liye ek ~4 MB ka model " +
-                    "download karna padta hai.",
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            if (!libraryOk) {
+        if (!libraryOk) {
+            EvCard {
                 Text(
                     text = "\u26A0 Native library is phone pe nahi mili. Offline wake " +
                         "word kaam nahi karega \u2014 app Google recognizer pe chalti " +
                         "rahegi.",
                     color = EvRed,
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp,
-                    modifier = Modifier.padding(top = 8.dp),
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
                 )
             }
+        }
 
-            SettingRow(
-                label = "Offline wake word use karo",
-                checked = offlineWake,
-                onChange = { offlineWake = it },
-            )
+        EvToggleCard(
+            title = "Offline wake word",
+            subtitle = "Wake word phone ke andar hi pakda jayega, bina internet ke " +
+                "aur bina awaaz kahin bheje. Iske liye neeche wala model chahiye.",
+            checked = offlineWake,
+            onChange = { offlineWake = it },
+        )
 
-            EvDialogHint(
-                text = when {
+        EvCard(highlighted = modelReady) {
+            EvCardTitle("Model")
+            EvCardSubtitle(
+                when {
                     downloading -> status.ifBlank { "Download ho raha hai\u2026" }
                     status.isNotBlank() -> status
                     modelReady -> "Model ready hai"
-                    else -> "Model abhi download nahi hua"
-                },
-                modifier = Modifier.padding(top = 8.dp),
+                    else -> "Model abhi download nahi hua (~4 MB)"
+                }
             )
 
             Row(modifier = Modifier.padding(top = 4.dp)) {
                 EvDialogButton(
-                    label = if (modelReady) "Dobara download" else "Model download karo",
+                    label = if (modelReady) "Dobara download" else "Download karo",
                     enabled = !downloading,
                     onClick = {
                         downloading = true
@@ -231,24 +183,24 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                     )
                 }
             }
+        }
 
+        EvCard {
+            EvCardTitle("Keyword")
+            EvCardSubtitle(
+                "Seedha \"E.V\" likhne se kaam nahi chalega — keyword model ke " +
+                    "tokens me likhna padta hai. Khaali chhod do to model ki apni " +
+                    "keywords.txt chalegi."
+            )
             OutlinedTextField(
                 value = keywords,
                 onValueChange = { keywords = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 10.dp),
                 singleLine = true,
-                label = { Text("Keyword (model ke tokens me)") },
                 placeholder = { Text("khaali = model ki apni list") },
                 colors = evFieldColors(),
-            )
-
-            EvDialogHint(
-                text = "Yahan seedha \"E.V\" likhne se kaam nahi chalega \u2014 keyword " +
-                    "model ke tokens me likhna padta hai. Khaali chhod do to model " +
-                    "ki apni keywords.txt chalegi.",
-                modifier = Modifier.padding(top = 4.dp),
             )
 
             OutlinedTextField(
@@ -256,39 +208,13 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                 onValueChange = { modelUrl = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 10.dp),
                 singleLine = true,
-                label = { Text("Model URL (optional)") },
-                placeholder = { Text("khaali = default") },
+                placeholder = { Text("Model URL — khaali = default") },
                 colors = evFieldColors(),
             )
         }
-    }
-}
 
-@Composable
-private fun Divider() {
-    HorizontalDivider(
-        color = EvOutline,
-        modifier = Modifier.padding(vertical = 16.dp),
-    )
-}
-
-@Composable
-private fun SettingRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            color = EvTextPrimary,
-            fontSize = 14.sp,
-            modifier = Modifier.weight(1f),
-        )
-        EvSwitch(checked = checked, onChange = onChange)
+        EvGap(32)
     }
 }
