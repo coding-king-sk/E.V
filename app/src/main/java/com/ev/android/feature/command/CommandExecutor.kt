@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import android.provider.Settings
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.calling.Caller
@@ -34,7 +35,7 @@ object CommandExecutor {
 
     private const val YOUTUBE_PACKAGE = "com.google.android.youtube"
 
-    /** Do kaam ke beech itna gap — warna doosra pehle ke khulne se pehle chal jata hai. */
+    /** Do kaam ke beech itna gap \u2014 warna doosra pehle ke khulne se pehle chal jata hai. */
     private const val MULTI_GAP_MS = 1500L
 
     suspend fun execute(context: Context, command: EvCommand): CommandResult = when (command) {
@@ -105,7 +106,7 @@ object CommandExecutor {
         is EvCommand.Multi -> runMulti(context, command.commands)
 
         is EvCommand.Device -> {
-            val result = DeviceControls.run(context, command.action)
+            val result = DeviceControls.run(context, command.action, command.level)
             if (result.ok) CommandResult.Success(result.message)
             else CommandResult.Failure(result.message)
         }
@@ -144,7 +145,7 @@ object CommandExecutor {
      *
      * Intent se kisi doosri app ke text box me likhna Android allow nahi karta,
      * isliye ye kaam Accessibility service karti hai: pehle usme text "arm"
-     * karte hain, phir app kholte hain — app khulte hi wo focus wale box me
+     * karte hain, phir app kholte hain \u2014 app khulte hi wo focus wale box me
      * text bhar deti hai.
      */
     private fun typeText(context: Context, command: EvCommand.TypeText): CommandResult {
@@ -174,11 +175,33 @@ object CommandExecutor {
         )
     }
 
+    /**
+     * Kuch "app" asal me app nahi, Android ki screen hoti hai \u2014 camera,
+     * settings, wifi, bluetooth. Inka koi package nahi hota, isliye pehle ye
+     * seedha "open nahi ho paya" bol dete the. Ab inke liye system ka apna
+     * intent chalta hai.
+     */
+    private fun systemIntentFor(label: String): Intent? = when (label.lowercase()) {
+        "camera" -> Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+        "settings", "setting" -> Intent(Settings.ACTION_SETTINGS)
+        "wifi", "wi-fi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
+        "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+        else -> null
+    }
+
     private fun openApp(context: Context, target: AppTarget): CommandResult {
         val pkg = target.packageName
 
         if (pkg != null && AppLauncher.launchPackage(context, pkg)) {
             return CommandResult.Success("${target.label} khul raha hai")
+        }
+
+        if (pkg == null) {
+            systemIntentFor(target.label)?.let { intent ->
+                if (AppLauncher.startIntent(context, intent)) {
+                    return CommandResult.Success("${target.label} khol diya")
+                }
+            }
         }
 
         target.webFallbackUrl?.let { url ->
@@ -307,7 +330,7 @@ object CommandExecutor {
         }
     }
 
-    /** Naam ya seedha number — dono se phone number nikalta hai. */
+    /** Naam ya seedha number \u2014 dono se phone number nikalta hai. */
     private suspend fun resolveNumber(context: Context, contactName: String): String? = when {
         PhoneNumbers.looksLikeNumber(contactName) -> PhoneNumbers.normalize(contactName)
         else -> ContactsRepository.findByName(context, contactName)?.phone
