@@ -105,10 +105,26 @@ object CommandParser {
         "mujhe", "muje", "please", "plz", "zara", "bhai", "abhi", "to", "na", "yaar",
     )
 
-    private val connectors =
-        setOf("pe", "par", "pr", "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke")
+    /**
+     * Jodne wale chhote shabd.
+     *
+     * "per", "pey" aur "peh" isliye hain kyunki Google ka recognizer Hinglish
+     * me "pe" ko aksar "per" likh deta hai ("whatsapp per armaan ko…"). Inhe
+     * yahan na rakhne se ye contact ke naam ka hissa ban jate the aur phir koi
+     * contact match hi nahi hota tha.
+     */
+    private val connectors = setOf(
+        "pe", "per", "pey", "peh", "par", "pr",
+        "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke",
+    )
 
-    private val messageNoiseWords = setOf("message", "msg", "text", "sms", "whatsapp", "wa")
+    /** Ek hi regex ke andar sab connectors — dono jagah yahi list chalti hai. */
+    private const val CONNECTOR_PATTERN = "pe|per|pey|peh|par|pr|me|mein|main|on|in"
+
+    private val messageNoiseWords = setOf(
+        "message", "msg", "text", "sms",
+        "whatsapp", "whatsaap", "watsapp", "whatsup", "wa",
+    )
 
     private val callNoiseWords =
         setOf("call", "phone", "dial", "lagao", "laga", "karo", "kar", "kardo", "do", "milao")
@@ -124,10 +140,10 @@ object CommandParser {
     )
 
     private val targetSplitRegex =
-        Regex("^(.{2,40}?)\\s+(pe|par|pr|me|mein|main|on|in)\\s+(.+)$")
+        Regex("^(.{2,40}?)\\s+($CONNECTOR_PATTERN)\\s+(.+)$")
 
     private val whatsappPrefixRegex =
-        Regex("^(whatsapp|whats app|wa)\\s+(pe|par|pr|me|mein|main|on)\\s+")
+        Regex("^(whatsapp|whats app|whatsaap|watsapp|whatsup|wa)\\s+($CONNECTOR_PATTERN)\\s+")
 
     private val koRegex = Regex("(^|\\s)ko($|\\s)")
 
@@ -506,7 +522,9 @@ object CommandParser {
     // -------------------------------------------------------------- message
 
     private fun parseMessage(text: String): EvCommand? {
-        val mentionsWhatsApp = text.contains("whatsapp") || text.contains("whats app")
+        val mentionsWhatsApp = messageNoiseWords
+            .filter { it.startsWith("w") }
+            .any { containsWord(text, it) } || text.contains("whats app")
         val mentionsSms = containsWord(text, "sms") || text.contains("text message")
         val stripped = text.replace(whatsappPrefixRegex, "").trim()
 
