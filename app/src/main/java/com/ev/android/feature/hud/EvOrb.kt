@@ -1,6 +1,5 @@
 package com.ev.android.feature.hud
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -21,38 +20,76 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Beech wala ghoomta hua orb — bindiyon se bana globe.
+ * Ghoomta hua bindiyon ka globe.
  *
- * Ye sirf sajawat nahi hai; iski chaal se ek nazar me pata chal jata hai ki
- * E.V kis haalat me hai:
- *
- *  - dheeme ghoomta globe   -> ready, kuch nahi ho raha
- *  - tez ghoomta + halka bada -> sun raha hai / kaam kar raha hai
- *
- * Poori cheez Canvas pe bani hai, koi GIF ya image asset nahi. Isliye APK me
- * ek byte extra nahi jata, har screen size pe sharp rehta hai, aur rang theme
- * ke saath badla ja sakta hai. GIF chalane ke liye alag image library (Coil
- * jaisi) add karni padti, jo sirf ek animation ke liye zyada hai.
+ * GIF ko seedha chalane ke liye ek image library (Coil) chahiye hoti, sirf ek
+ * animation ke liye. Isliye wahi cheez yahan Canvas pe banayi gayi hai — na
+ * extra library, na kisi screen size pe blur.
  */
+private class Dot(val x: Float, val y: Float, val z: Float)
+
+/**
+ * Golden-angle spiral: sphere pe [count] point barabar failane ka sabse saaf
+ * tareeka. Latitude/longitude grid se karte to dono poles pe dots ka gucchha
+ * ban jata.
+ */
+private fun evenlySpread(count: Int): List<Dot> {
+    val golden = PI * (3.0 - sqrt(5.0))
+    return (0 until count).map { i ->
+        val y = 1.0 - (i / (count - 1.0)) * 2.0
+        val radius = sqrt((1.0 - y * y).coerceAtLeast(0.0))
+        val theta = golden * i
+        Dot(
+            x = (cos(theta) * radius).toFloat(),
+            y = y.toFloat(),
+            z = (sin(theta) * radius).toFloat(),
+        )
+    }
+}
+
+/** Ek horizontal chhalla — equator aur poles ke paas ki lakeeron ke liye. */
+private fun ring(y: Float, count: Int): List<Dot> {
+    val radius = sqrt((1f - y * y).coerceAtLeast(0f))
+    return (0 until count).map { i ->
+        val angle = 2.0 * PI * i / count
+        Dot(
+            x = (cos(angle) * radius).toFloat(),
+            y = y,
+            z = (sin(angle) * radius).toFloat(),
+        )
+    }
+}
+
 @Composable
 fun EvOrb(
     listening: Boolean,
     busy: Boolean,
-    dimmed: Boolean,
+    dimmed: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val transition = rememberInfiniteTransition(label = "orb")
-
     val active = listening || busy
+
+    // Dot set ek hi baar banta hai — har frame pe banane ki koi zaroorat nahi.
+    val dots = remember {
+        evenlySpread(1000) +
+            ring(0f, 150) +
+            ring(0.02f, 120) +
+            ring(-0.02f, 120) +
+            ring(0.78f, 84) +
+            ring(0.88f, 64) +
+            ring(0.94f, 44) +
+            ring(-0.78f, 84) +
+            ring(-0.88f, 64) +
+            ring(-0.94f, 44)
+    }
+
+    val transition = rememberInfiniteTransition(label = "orb")
 
     val spin by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (active) 7000 else 20000,
-                easing = LinearEasing,
-            ),
+            animation = tween(if (active) 7000 else 20000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "spin",
@@ -62,23 +99,11 @@ fun EvOrb(
         initialValue = 0.97f,
         targetValue = if (active) 1.06f else 1.00f,
         animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (active) 700 else 2400,
-                easing = FastOutSlowInEasing,
-            ),
+            animation = tween(if (active) 900 else 2600, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "pulse",
     )
-
-    // Ek hi baar bante hain, har frame pe nahi — warna 800 se zyada point ka
-    // hisaab 60 baar per second hota rehta.
-    val dots = remember {
-        evenlySpread(540) +
-            ring(0f, 96) +
-            ring(0.80f, 54) + ring(0.90f, 40) +
-            ring(-0.80f, 54) + ring(-0.90f, 40)
-    }
 
     val fade = if (dimmed) 0.75f else 1f
 
@@ -87,55 +112,24 @@ fun EvOrb(
         val cx = size.width / 2f
         val cy = size.height / 2f
 
-        val angle = (spin * PI / 180.0).toFloat()
+        val angle = spin * PI.toFloat() / 180f
         val cosA = cos(angle)
         val sinA = sin(angle)
 
         dots.forEach { dot ->
-            // Y axis ke around ghumao, phir seedha flat kar do.
+            // Y-axis ke around ghumao.
             val x = dot.x * cosA + dot.z * sinA
             val z = -dot.x * sinA + dot.z * cosA
 
-            // 0 = globe ke peeche, 1 = bilkul saamne.
+            // z = -1 (sabse peeche) .. +1 (sabse aage) -> 0..1
             val depth = (z + 1f) / 2f
 
             drawCircle(
-                color = if (depth > 0.55f) EvGreenGlow else EvGreen,
-                radius = radius * (0.004f + 0.008f * depth),
+                color = if (depth > 0.5f) EvGreenGlow else EvGreen,
+                radius = radius * (0.005f + 0.010f * depth * depth),
                 center = Offset(cx + x * radius, cy + dot.y * radius),
-                alpha = ((0.12f + 0.88f * depth * depth) * fade).coerceIn(0f, 1f),
+                alpha = ((0.16f + 0.84f * depth * depth) * fade).coerceIn(0f, 1f),
             )
         }
-    }
-}
-
-private class Dot(val x: Float, val y: Float, val z: Float)
-
-/**
- * Gole pe barabar failaye hue points.
- *
- * Seedha random ya lat/long grid lene se dots poles pe ikatthe ho jate hain
- * aur equator khaali dikhta hai. Golden angle wala tareeka har point ko
- * barabar jagah deta hai.
- */
-private fun evenlySpread(count: Int): List<Dot> {
-    val golden = PI * (3.0 - sqrt(5.0))
-
-    return List(count) { index ->
-        val y = 1f - (index / (count - 1).toFloat()) * 2f
-        val r = sqrt((1f - y * y).coerceAtLeast(0f))
-        val theta = (golden * index).toFloat()
-
-        Dot(cos(theta) * r, y, sin(theta) * r)
-    }
-}
-
-/** Ek nishchit unchai pe dots ka gol chhalla. */
-private fun ring(y: Float, count: Int): List<Dot> {
-    val r = sqrt((1f - y * y).coerceAtLeast(0f))
-
-    return List(count) { index ->
-        val angle = (2.0 * PI * index / count).toFloat()
-        Dot(cos(angle) * r, y, sin(angle) * r)
     }
 }
