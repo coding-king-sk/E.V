@@ -120,6 +120,28 @@ object AppCatalog {
             systemAction = MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA,
             keywords = listOf("photo", "tasveer", "click"),
         ),
+        // Gallery ka koi ek pakka package nahi hota \u2014 har phone me alag app hoti
+        // hai (Google Photos, Samsung Gallery, MIUI Gallery\u2026). Isliye package ki
+        // jagah CommandExecutor "image/*" wala intent bhejta hai aur Android khud
+        // us phone ki gallery chun leta hai.
+        AppShortcut(
+            id = "gallery",
+            label = "Gallery",
+            emoji = "\uD83D\uDDBC\uFE0F",
+            keywords = listOf("gallery", "gaellery", "photos", "photo dekho", "tasveer dekho", "album"),
+        ),
+        AppShortcut(
+            id = "clock",
+            label = "Clock",
+            emoji = "\u23F0",
+            keywords = listOf("ghadi", "alarm", "timer", "stopwatch"),
+        ),
+        AppShortcut(
+            id = "dialer",
+            label = "Dialer",
+            emoji = "\uD83D\uDCDE",
+            keywords = listOf("phone", "dial pad", "dialpad", "call app"),
+        ),
         AppShortcut(
             id = "settings",
             label = "Settings",
