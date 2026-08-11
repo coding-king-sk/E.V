@@ -28,6 +28,7 @@ import com.ev.android.feature.messaging.SmsSender
 import com.ev.android.feature.notes.Notes
 import com.ev.android.feature.reminders.Reminders
 import com.ev.android.feature.settings.EvSettings
+import com.ev.android.feature.weather.EvWeather
 import kotlinx.coroutines.delay
 import java.net.URLEncoder
 
@@ -64,6 +65,9 @@ object CommandExecutor {
         is EvCommand.Info -> CommandResult.Success(PhoneInfo.answer(context, command.kind))
 
         is EvCommand.WhereAmI -> CommandResult.Success(EvLocation.describe(context))
+
+        is EvCommand.Weather ->
+            CommandResult.Success(EvWeather.describe(context, command.dayOffset))
 
         is EvCommand.Calculate ->
             Calculator.evaluate(command.expression)
@@ -164,7 +168,7 @@ object CommandExecutor {
         return if (allOk) CommandResult.Success(joined) else CommandResult.Failure(joined)
     }
 
-    /** "google pe X search karo" \u2014 seedha browser me. */
+    /** \"google pe X search karo\" \u2014 seedha browser me. */
     private fun webSearch(context: Context, query: String): CommandResult {
         val encoded = URLEncoder.encode(query, "UTF-8")
         val uri = Uri.parse("https://www.google.com/search?q=$encoded")
@@ -203,7 +207,7 @@ object CommandExecutor {
      * App ke text box me likhna.
      *
      * Intent se kisi doosri app ke text box me likhna Android allow nahi karta,
-     * isliye ye kaam Accessibility service karti hai: pehle usme text "arm"
+     * isliye ye kaam Accessibility service karti hai: pehle usme text \"arm\"
      * karte hain, phir app kholte hain \u2014 app khulte hi wo focus wale box me
      * text bhar deti hai.
      */
@@ -239,9 +243,9 @@ object CommandExecutor {
     }
 
     /**
-     * Kuch "app" asal me app nahi, Android ki screen hoti hai \u2014 camera,
+     * Kuch \"app\" asal me app nahi, Android ki screen hoti hai \u2014 camera,
      * settings, wifi, bluetooth. Inka koi package nahi hota, isliye pehle ye
-     * seedha "open nahi ho paya" bol dete the. Ab inke liye system ka apna
+     * seedha \"open nahi ho paya\" bol dete the. Ab inke liye system ka apna
      * intent chalta hai.
      *
      * Gallery, ghadi aur dialer ka bhi yahi haal hai: har phone me alag app
