@@ -2,6 +2,8 @@ package com.ev.android.feature.command
 
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.device.DeviceAction
+import com.ev.android.feature.info.Calculator
+import com.ev.android.feature.info.InfoKind
 import com.ev.android.feature.launcher.AppCatalog
 import com.ev.android.feature.media.MediaAction
 
@@ -15,10 +17,13 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "whatsapp kholo"                       -> OpenApp(WhatsApp)
  *  "rehan ko bolo ki main aa raha hoon"   -> SendWhatsApp("rehan", "main aa raha hoon")
  *  "rehan ko call lagao"                  -> CallContact("rehan")
+ *  "whatsapp pe rehan ko call karo"       -> WhatsAppCall("rehan")
  *  "5 minute ka timer lagao"              -> Timer(300)
- *  "kal subah 8 baje yaad dilana ki dawai" -> Reminder(kal 08:00, "dawai")
+ *  "note karo khana khana hai"            -> Note("khana khana hai")
+ *  "battery kitni hai"                    -> Info(BATTERY)
+ *  "1500 ka 18% kitna hota hai"           -> Calculate
+ *  "google pe sachin search karo"         -> WebSearch("sachin")
  *  "photo lo"                             -> TakePhoto(front = false)
- *  "instagram pe type karo hello"         -> TypeText("hello", Instagram)
  *  "volume 60% karo"                      -> Device(VOLUME_SET, 60)
  *  "torch on karo aur whatsapp kholo"     -> Multi([Device, OpenApp])
  *
@@ -31,6 +36,8 @@ object CommandParser {
 
     val youtube = AppTarget("YouTube", "com.google.android.youtube", "https://www.youtube.com")
     val whatsapp = AppTarget("WhatsApp", "com.whatsapp", "https://web.whatsapp.com")
+
+    private val google = AppTarget("Google", null, "https://www.google.com")
 
     private val playVerbs = listOf(
         "laga do", "lagaa do", "lagado", "laga de", "lagade", "lagao", "lagaao", "laga",
@@ -76,6 +83,19 @@ object CommandParser {
     )
 
     /**
+     * Note likhne ke phrases.
+     *
+     * Akela "note" nahi rakha \u2014 "note kholo" ya "notes dikhao" me user list
+     * dekhna chahta hai, naya note nahi banana.
+     */
+    private val noteVerbs = listOf(
+        "note kar lo", "note karlo", "note kar do", "note kardo", "note karo", "note kar",
+        "note me likho", "note likh do", "note likho", "note bana do", "note banao",
+        "likh lo note", "note kar lena",
+        "note down", "make a note", "add note",
+    )
+
+    /**
      * Photo ke phrases.
      *
      * Akela "photo" jaan-boojh ke nahi rakha \u2014 warna "photo gallery kholo" bhi
@@ -97,7 +117,11 @@ object CommandParser {
         "vidio banao", "vidio bnao",
         "video record karo", "video record", "record video",
         "video shoot karo", "video le lo", "video lo",
-        "recording shuru karo", "recording shuru",
+        // "recording chalu karo" bol ke log seedha recording chahte hain \u2014 camera
+        // khol ke shutter dhoondhna nahi.
+        "recording shuru karo", "recording shuru", "recording chalu karo",
+        "recording chalu kar do", "recording chalu", "recording start karo",
+        "recording on karo", "record karo", "record kar do",
     )
 
     private val frontCameraWords = listOf(
@@ -216,6 +240,33 @@ object CommandParser {
         "ye", "yeh", "ise", "isko", "is", "wala",
     )
 
+    // ----------------------------------------------------- info vocabulary
+
+    private val batteryWords = listOf("battery", "batri", "baitri", "baitry", "batery", "charging")
+
+    private val storageWords = listOf(
+        "storage", "stroage", "memory", "space", "jagah", "internal storage",
+    )
+
+    private val timeQuestionWords = listOf(
+        "time kya", "kya time", "time kitna", "kitne baje", "kitna baja", "kya baja",
+        "samay kya", "time batao", "time bta do", "time bata", "what time",
+        "time kya ho raha", "time kya hua",
+    )
+
+    private val dateQuestionWords = listOf(
+        "aaj ki date", "date kya", "kaun si tarikh", "kaunsi tarikh", "konsi tarikh",
+        "aaj kya din", "aaj konsa din", "aaj kaun sa din", "today date", "tareekh kya",
+    )
+
+    /** Sawaal poochne wale shabd \u2014 inke bina "battery" sirf ek shabd hai. */
+    private val askWords = listOf(
+        "kitni", "kitna", "kitne", "kya", "batao", "bta", "bata", "bta do", "status",
+        "bacha", "bachi", "baki", "remaining", "how much", "level",
+    )
+
+    private val googleWords = listOf("google", "gugal", "gogle", "googal")
+
     // ---------------------------------------------------- device vocabulary
 
     private val onWords = listOf("on", "chalu", "chaalu", "jala", "jalao", "jala do", "enable", "start")
@@ -321,11 +372,22 @@ object CommandParser {
         // Device toggles pehle \u2014 "torch on karo" ko app-launcher parse na kar de.
         parseDevice(normalized)?.let { return it }
 
-        // "photo lo", "30 second ka video banao"
+        // "photo lo", "30 second ka video banao", "recording chalu karo"
         parseCamera(normalized)?.let { return it }
 
         // "instagram pe type karo hello bhai"
         parseType(normalized, installedApps)?.let { return it }
+
+        // "note karo khana khana hai"
+        parseNote(normalized)?.let { return it }
+
+        // "battery kitni hai", "time kya hua", "storage kitna bacha"
+        //
+        // Timer se pehle, warna "time kya hua hai" timer banane ki koshish karta.
+        parseInfo(normalized)?.let { return it }
+
+        // "1500 ka 18% kitna hota hai"
+        parseCalculate(normalized)?.let { return it }
 
         // "ye gaana kaun sa hai", "next gaana", "gaana roko", "10 second aage"
         parseMedia(normalized)?.let { return it }
@@ -338,11 +400,17 @@ object CommandParser {
         // "5 minute ka timer", "subah 7 baje alarm"
         parseTimerOrAlarm(normalized)?.let { return it }
 
+        // "whatsapp pe rehan ko call karo" \u2014 aam call se pehle.
+        parseWhatsAppCall(normalized)?.let { return it }
+
         // "rehan ko call lagao"
         parseCall(normalized)?.let { return it }
 
         // Messaging ki shape ("<naam> ko ... bhejo") bahut distinctive hai.
         parseMessage(normalized)?.let { return it }
+
+        // "google pe sachin tendulkar search karo"
+        parseWebSearch(normalized)?.let { return it }
 
         var text = normalized
         var target: AppTarget? = null
@@ -381,6 +449,74 @@ object CommandParser {
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
         }
+    }
+
+    // ----------------------------------------------------------------- note
+
+    /** "note karo khana khana hai" -> Note("khana khana hai") */
+    private fun parseNote(text: String): EvCommand? {
+        val verb = matchPhrase(text, noteVerbs) ?: return null
+        val match = phraseRegex(verb).find(text) ?: return null
+
+        val after = text.substring(match.range.last + 1)
+            .trim()
+            .removePrefix("ki ")
+            .removePrefix("that ")
+            .trim()
+        val before = text.substring(0, match.range.first).trim()
+
+        val body = cleanQuery(if (after.isNotEmpty()) after else before)
+        if (body.isBlank()) return null
+
+        return EvCommand.Note(body)
+    }
+
+    // ----------------------------------------------------------------- info
+
+    /**
+     * Wo sawaal jinka jawab phone khud jaanta hai.
+     *
+     * Battery aur storage ke liye sawaal wala shabd zaroori hai, warna
+     * "battery saver on karo" jaisi baat bhi jawab bann jati.
+     */
+    private fun parseInfo(text: String): EvCommand? {
+        if (dateQuestionWords.any { containsWord(text, it) }) return EvCommand.Info(InfoKind.DATE)
+        if (timeQuestionWords.any { containsWord(text, it) }) return EvCommand.Info(InfoKind.TIME)
+
+        val asks = askWords.any { containsWord(text, it) }
+        if (!asks) return null
+
+        if (batteryWords.any { containsWord(text, it) }) return EvCommand.Info(InfoKind.BATTERY)
+        if (storageWords.any { containsWord(text, it) }) return EvCommand.Info(InfoKind.STORAGE)
+
+        return null
+    }
+
+    /** Hisaab tabhi jab Calculator ko sach me kuch mila ho. */
+    private fun parseCalculate(text: String): EvCommand? =
+        if (Calculator.evaluate(text) != null) EvCommand.Calculate(text) else null
+
+    // ----------------------------------------------------------- web search
+
+    /**
+     * "google pe X search karo".
+     *
+     * Google koi app target nahi hai (har phone me alag browser hota hai),
+     * isliye ise alag se pakadte hain. Sirf "google kholo" bola ho to search
+     * page khol dete hain.
+     */
+    private fun parseWebSearch(text: String): EvCommand? {
+        if (googleWords.none { containsWord(text, it) }) return null
+
+        val verb = matchPhrase(text, searchVerbs) ?: matchPhrase(text, openVerbs) ?: return null
+
+        var work = text.replace(phraseRegex(verb), " ")
+        googleWords.forEach { work = work.replace(phraseRegex(it), " ") }
+
+        val query = cleanQuery(work)
+        if (query.isEmpty()) return EvCommand.OpenApp(google)
+
+        return EvCommand.WebSearch(query)
     }
 
     // --------------------------------------------------------------- camera
@@ -544,6 +680,31 @@ object CommandParser {
     }
 
     // ----------------------------------------------------------------- call
+
+    /**
+     * "whatsapp pe rehan ko call karo" \u2014 normal call se alag.
+     *
+     * WhatsApp ka naam liya ho to SIM se call lagana galat hoga; user ka matlab
+     * internet call hota hai.
+     */
+    private fun parseWhatsAppCall(text: String): EvCommand? {
+        val mentionsWhatsApp = messageNoiseWords
+            .filter { it.startsWith("w") }
+            .any { containsWord(text, it) } || text.contains("whats app")
+        if (!mentionsWhatsApp) return null
+
+        if (matchPhrase(text, callVerbs) == null) return null
+
+        val video = containsWord(text, "video")
+
+        val stripped = text.replace(whatsappPrefixRegex, " ").trim()
+        val koMatch = koRegex.find(stripped) ?: return null
+
+        val name = cleanName(stripped.substring(0, koMatch.range.first))
+        if (name.isEmpty()) return null
+
+        return EvCommand.WhatsAppCall(contactName = name, video = video)
+    }
 
     private fun parseCall(text: String): EvCommand? {
         val verb = matchPhrase(text, callVerbs) ?: return null
