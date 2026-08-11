@@ -86,14 +86,24 @@ object CommandHistory {
         save(context)
     }
 
-    /** Command ka aasan sa description — history me dikhane ke liye. */
+    /**
+     * Command ka aasan sa description — history me dikhane ke liye.
+     *
+     * Dhyan rahe: ye 'when' EvCommand par exhaustive hai. Jab bhi EvCommand me
+     * naya member add ho, usi push me yahan bhi branch add karni hogi, warna
+     * compile fail hoti hai.
+     */
     fun describe(command: EvCommand): String = when (command) {
         is EvCommand.OpenApp -> "App kholo: " + command.target.label
         is EvCommand.PlayMedia -> "Chalao \"" + command.query + "\" (" + command.target.label + ")"
         is EvCommand.SearchInApp -> "Search \"" + command.query + "\" (" + command.target.label + ")"
+        is EvCommand.WebSearch -> "Google: " + command.query
         is EvCommand.SendWhatsApp -> "WhatsApp \u2192 " + (command.contactName ?: "?")
         is EvCommand.SendSms -> "SMS \u2192 " + command.contactName
         is EvCommand.CallContact -> "Call \u2192 " + command.contactName
+        is EvCommand.WhatsAppCall ->
+            (if (command.video) "WhatsApp video call \u2192 " else "WhatsApp call \u2192 ") +
+                command.contactName
         is EvCommand.Media -> "Media: " + command.action.name
         EvCommand.IdentifySong -> "Gaana pehchano"
         is EvCommand.Timer -> "Timer: " + command.seconds + " second"
@@ -101,6 +111,10 @@ object CommandHistory {
         is EvCommand.Reminder ->
             "Reminder " + SimpleDateFormat("d MMM h:mm a", Locale.getDefault())
                 .format(Date(command.at)) + ": " + command.text
+        is EvCommand.Note -> "Note: " + command.text
+        is EvCommand.Info -> "Sawaal: " + command.kind.name
+        EvCommand.WhereAmI -> "Meri location"
+        is EvCommand.Calculate -> "Hisaab: " + command.expression
         is EvCommand.TakePhoto -> if (command.front) "Selfie" else "Photo"
         is EvCommand.RecordVideo -> "Video: " + command.seconds + " second"
         is EvCommand.TypeText ->
