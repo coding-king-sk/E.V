@@ -21,6 +21,7 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "5 minute ka timer lagao"              -> Timer(300)
  *  "note karo khana khana hai"            -> Note("khana khana hai")
  *  "battery kitni hai"                    -> Info(BATTERY)
+ *  "meri location batao"                  -> WhereAmI
  *  "1500 ka 18% kitna hota hai"           -> Calculate
  *  "google pe sachin search karo"         -> WebSearch("sachin")
  *  "photo lo"                             -> TakePhoto(front = false)
@@ -93,6 +94,21 @@ object CommandParser {
         "note me likho", "note likh do", "note likho", "note bana do", "note banao",
         "likh lo note", "note kar lena",
         "note down", "make a note", "add note",
+    )
+
+    /**
+     * "Meri location batao".
+     *
+     * Yahan "location" akela bhi kaafi nahi rakha \u2014 "location on karo" me user
+     * GPS chalu karna chahta hai, jawab nahi. Isliye har phrase me ya to
+     * "meri/mera" hai ya poochne wala shabd.
+     */
+    private val locationWords = listOf(
+        "meri location", "mera location", "meri lokeshan", "meri jagah",
+        "location batao", "location bta do", "location bata do", "location kya",
+        "location kahan", "main kahan hoon", "main kaha hu", "mai kahan hu",
+        "kahan hoon main", "kahan hu", "kaha hu", "kahan par hoon",
+        "mera address", "mera pata", "current location", "where am i",
     )
 
     /**
@@ -381,6 +397,12 @@ object CommandParser {
         // "note karo khana khana hai"
         parseNote(normalized)?.let { return it }
 
+        // "meri location batao"
+        //
+        // Info se pehle, warna "meri location batao" me "batao" dekh ke wo
+        // sawaal wali branch me chala jata.
+        parseLocation(normalized)?.let { return it }
+
         // "battery kitni hai", "time kya hua", "storage kitna bacha"
         //
         // Timer se pehle, warna "time kya hua hai" timer banane ki koshish karta.
@@ -470,6 +492,12 @@ object CommandParser {
 
         return EvCommand.Note(body)
     }
+
+    // ------------------------------------------------------------- location
+
+    /** "meri location batao", "main kahan hoon" -> WhereAmI */
+    private fun parseLocation(text: String): EvCommand? =
+        if (locationWords.any { containsWord(text, it) }) EvCommand.WhereAmI else null
 
     // ----------------------------------------------------------------- info
 

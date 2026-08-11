@@ -19,6 +19,7 @@ import com.ev.android.feature.device.DeviceControls
 import com.ev.android.feature.info.Calculator
 import com.ev.android.feature.info.PhoneInfo
 import com.ev.android.feature.launcher.AppLauncher
+import com.ev.android.feature.location.EvLocation
 import com.ev.android.feature.media.MediaAction
 import com.ev.android.feature.media.MediaControls
 import com.ev.android.feature.media.SongIdentifier
@@ -61,6 +62,8 @@ object CommandExecutor {
         }
 
         is EvCommand.Info -> CommandResult.Success(PhoneInfo.answer(context, command.kind))
+
+        is EvCommand.WhereAmI -> CommandResult.Success(EvLocation.describe(context))
 
         is EvCommand.Calculate ->
             Calculator.evaluate(command.expression)
