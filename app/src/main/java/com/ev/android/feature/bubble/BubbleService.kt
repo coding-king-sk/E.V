@@ -35,6 +35,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Bubble ko bahar se chalane wale chhote helpers.
@@ -103,7 +104,9 @@ class BubbleService : Service() {
     private var panel: View? = null
 
     private val handler = Handler(Looper.getMainLooper())
-    private val fadeRunnable = Runnable { orb?.animate()?.alpha(IDLE_ALPHA)?.setDuration(400)?.start() }
+    private val fadeRunnable = Runnable {
+        orb?.animate()?.alpha(IDLE_ALPHA)?.setDuration(400)?.start()
+    }
     private var pendingTap: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -297,14 +300,15 @@ class BubbleService : Service() {
         manager: WindowManager,
     ) {
         val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
         val sizePx = dp(SIZE_DP)
         val center = layout.x + sizePx / 2
         val target = if (center < screenWidth / 2) 0 else screenWidth - sizePx
 
         // Upar-neeche bhi thoda sambhal lete hain, warna bubble status bar ke
         // peeche ya navigation bar ke neeche gum ho jata hai.
-        val screenHeight = resources.displayMetrics.heightPixels
-        layout.y = layout.y.coerceIn(dp(24), screenHeight - sizePx - dp(24))
+        val lowest = (screenHeight - sizePx - dp(24)).coerceAtLeast(dp(24))
+        layout.y = layout.y.coerceIn(dp(24), lowest)
 
         ValueAnimator.ofInt(layout.x, target).apply {
             duration = SNAP_MS
@@ -598,7 +602,7 @@ class BubbleService : Service() {
             val cx = w / 2f
             val cy = h / 2f
             val outer = min(w, h) / 2f
-            val radius = outer * if (pressed) 0.74f : 0.8f
+            val radius = outer * (if (pressed) 0.74f else 0.8f)
 
             glow.shader = RadialGradient(
                 cx,
@@ -622,9 +626,9 @@ class BubbleService : Service() {
             // Khade taar (meridian) - ghoomte hue patle-chaude hote hain.
             for (i in 0 until MERIDIANS) {
                 val angle = phase + i * (Math.PI.toFloat() / MERIDIANS)
-                val halfWidth = radius * cos(angle)
-                oval.set(cx - abs(halfWidth), cy - radius, cx + abs(halfWidth), cy + radius)
-                line.alpha = (70 + 170 * abs(sin(angle))).toInt().coerceIn(40, 255)
+                val halfWidth = abs(radius * cos(angle))
+                oval.set(cx - halfWidth, cy - radius, cx + halfWidth, cy + radius)
+                line.alpha = (70f + 170f * abs(sin(angle))).toInt().coerceIn(40, 255)
                 canvas.drawOval(oval, line)
             }
 
@@ -632,7 +636,8 @@ class BubbleService : Service() {
             for (i in 1 until LATITUDES) {
                 val t = i.toFloat() / LATITUDES
                 val y = -radius + 2f * radius * t
-                val halfWidth = radius * kotlin.math.sqrt((1f - (y / radius) * (y / radius)).coerceAtLeast(0f))
+                val ratio = (1f - (y / radius) * (y / radius)).coerceAtLeast(0f)
+                val halfWidth = radius * sqrt(ratio)
                 val halfHeight = radius * 0.1f
                 oval.set(cx - halfWidth, cy + y - halfHeight, cx + halfWidth, cy + y + halfHeight)
                 line.alpha = 110
