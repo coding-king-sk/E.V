@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ev.android.feature.bubble.Bubble
 import com.ev.android.feature.hud.EvCard
 import com.ev.android.feature.hud.EvCardSubtitle
 import com.ev.android.feature.hud.EvCardTitle
@@ -35,11 +36,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * App ki saari settings \u2014 ab home screen ke **andar** wale panel me.
- *
- * Pehle ye poori screen ka dialog thi, jisse app do alag screen jaisi lagti
- * thi. Reference design me header aur tabs upar dikhte rehte hain aur command
- * box neeche \u2014 isliye ab ye [EvPanel] me hai.
+ * App ki saari settings \u2014 poore page me.
  *
  * Groq API key ka field yahan jaan-boojh ke nahi hai \u2014 wo home screen ke
  * API KEY button me hai. Ek hi cheez do jagah rakhne se ye confusion hota tha
@@ -61,6 +58,11 @@ fun SettingsPanel(
     var autoSend by remember { mutableStateOf(EvSettings.whatsappAutoSend(context)) }
     var autoType by remember { mutableStateOf(EvSettings.autoType(context)) }
     var aliases by remember { mutableStateOf(EvSettings.aliasesRaw(context)) }
+
+    var bubbleOn by remember { mutableStateOf(EvSettings.bubbleEnabled(context)) }
+    var overlayOk by remember { mutableStateOf(Bubble.canShow(context)) }
+
+    var wakeName by remember { mutableStateOf(EvSettings.wakeName(context)) }
 
     var reminders by remember { mutableStateOf(Reminders.upcoming(context)) }
     val notificationsOff = remember { Reminders.notificationsBlocked(context) }
@@ -86,9 +88,20 @@ fun SettingsPanel(
             EvSettings.setWhatsappAutoSend(context, autoSend)
             EvSettings.setAutoType(context, autoType)
             EvSettings.setAliasesRaw(context, aliases)
+            EvSettings.setWakeName(context, wakeName)
             EvSettings.setOfflineWakeWord(context, offlineWake)
             EvSettings.setWakeWordModelUrl(context, modelUrl)
             EvSettings.setWakeWordKeywords(context, keywords)
+
+            // Bubble ko yahin chalu/band kar dete hain \u2014 save daba ke bahar
+            // jaane par turant farq dikhna chahiye.
+            EvSettings.setBubbleEnabled(context, bubbleOn)
+            if (bubbleOn && Bubble.canShow(context)) {
+                Bubble.start(context)
+            } else {
+                Bubble.stop(context)
+            }
+
             onSaved(
                 if (aiOn) "AI fallback chalu hai" else "AI fallback band hai"
             )
@@ -100,6 +113,68 @@ fun SettingsPanel(
         // sabse upar hai \u2014 typing/auto-send wali accessibility bhi isi list me.
         EvSectionHeader("Permissions")
         PermissionsSection()
+
+        // ---------------------------------------------------- floating bubble
+
+        EvSectionHeader("Floating bubble")
+
+        if (!overlayOk) {
+            EvCard {
+                Text(
+                    text = "\u26A0 \"Display over other apps\" ki permission nahi hai. " +
+                        "Ye normal permission dialog se nahi milti \u2014 neeche wale " +
+                        "button se Settings khol ke E.V ko allow karo, phir wapas " +
+                        "aa ke CHECK dabao.",
+                    color = EvRed,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+
+                Row(modifier = Modifier.padding(top = 4.dp)) {
+                    EvDialogButton(
+                        label = "Permission do",
+                        onClick = { context.startActivity(Bubble.permissionIntent(context)) },
+                    )
+                    EvDialogButton(
+                        label = "Check",
+                        onClick = { overlayOk = Bubble.canShow(context) },
+                    )
+                }
+            }
+        }
+
+        EvToggleCard(
+            title = "Bubble dikhao",
+            subtitle = "E.V ka orb har app ke upar tairta rahega. Tap karo to E.V " +
+                "khul jayega, ungli se jahan chaho khinch ke rakh do, aur lamba " +
+                "daba ke band kar do.",
+            checked = bubbleOn,
+            onChange = { bubbleOn = it },
+        )
+
+        // ---------------------------------------------------- E.V ka naam
+
+        EvSectionHeader("E.V ka naam")
+
+        EvCard {
+            EvCardTitle("Kis naam se jagana hai?")
+            EvCardSubtitle(
+                "Hands-free mode isi naam ko sunta hai. \"Jarvis\", \"Boss\", jo " +
+                    "chaho rakh lo \u2014 phir \"Hey Jarvis\" bol ke jagana. Chhote aur " +
+                    "saaf naam behtar pakde jaate hain. Khaali chhodoge to E.V hi " +
+                    "rahega."
+            )
+            OutlinedTextField(
+                value = wakeName,
+                onValueChange = { wakeName = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                singleLine = true,
+                placeholder = { Text(EvSettings.DEFAULT_WAKE_NAME) },
+                colors = evFieldColors(),
+            )
+        }
 
         EvSectionHeader("Messaging")
 
@@ -212,7 +287,7 @@ fun SettingsPanel(
             title = "Mic pe Whisper (Groq)",
             subtitle = "Whisper Hinglish kaafi behtar samajhta hai, par aapki awaaz " +
                 "Groq ke server pe jaati hai aur internet chahiye. Sirf mic button " +
-                "pe lagta hai, \"Hey E.V\" pe nahi.",
+                "pe lagta hai, wake word pe nahi.",
             checked = whisperOn,
             onChange = { whisperOn = it },
         )
@@ -298,7 +373,7 @@ fun SettingsPanel(
         EvCard {
             EvCardTitle("Keyword")
             EvCardSubtitle(
-                "Seedha \"E.V\" likhne se kaam nahi chalega \u2014 keyword model ke " +
+                "Seedha naam likhne se kaam nahi chalega \u2014 keyword model ke " +
                     "tokens me likhna padta hai. Khaali chhod do to model ki apni " +
                     "keywords.txt chalegi."
             )
