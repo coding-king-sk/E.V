@@ -1,10 +1,12 @@
 package com.ev.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import com.ev.android.feature.bubble.Bubble
 import com.ev.android.feature.launcher.LauncherScreen
 import com.ev.android.feature.permissions.AppPermissions
 import com.ev.android.ui.theme.EVTheme
@@ -35,10 +37,31 @@ class MainActivity : ComponentActivity() {
             permissionLauncher.launch(missing.toTypedArray())
         }
 
+        // Floating bubble se aaye ho to seedha kaam pe lag jao \u2014 mic khol do
+        // ya jo command bheji hai wo chala do.
+        val listen = intent?.getBooleanExtra(Bubble.EXTRA_LISTEN, false) ?: false
+        val command = intent?.getStringExtra(Bubble.EXTRA_COMMAND)
+
         setContent {
             EVTheme {
-                LauncherScreen()
+                LauncherScreen(autoListen = listen, autoCommand = command)
             }
         }
+    }
+
+    /**
+     * App pehle se khuli ho aur bubble se dobara aaye.
+     *
+     * SINGLE_TOP ki wajah se `onCreate` dobara nahi chalta, isliye naya intent
+     * yahan aata hai. Sabse saaf tareeka hai screen ko dobara banana \u2014 tabhi
+     * naya extra padha jayega.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+
+        val hasWork = intent.getBooleanExtra(Bubble.EXTRA_LISTEN, false) ||
+            intent.getStringExtra(Bubble.EXTRA_COMMAND) != null
+        if (hasWork) recreate()
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,10 +34,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -88,6 +91,8 @@ import com.ev.android.feature.hud.OrbStyle
 import com.ev.android.feature.hud.OrbStyleStore
 import com.ev.android.feature.notes.Note
 import com.ev.android.feature.notes.Notes
+import com.ev.android.feature.reminders.Reminder
+import com.ev.android.feature.reminders.Reminders
 import com.ev.android.feature.settings.ApiKeyDialog
 import com.ev.android.feature.settings.EvSettings
 import com.ev.android.feature.settings.SettingsPanel
@@ -110,11 +115,20 @@ import java.util.Date
 import java.util.Locale
 
 private const val TAB_COMMAND = "COMMAND"
+private const val TAB_REMINDER = "REMINDER"
+private const val TAB_ALIASES = "ALIASES"
 private const val TAB_NOTES = "NOTES"
 private const val TAB_GALLERY = "GALLERY"
 private const val TAB_HISTORY = "HISTORY"
 
-private val tabs = listOf(TAB_COMMAND, TAB_NOTES, TAB_GALLERY, TAB_HISTORY)
+private val tabs = listOf(
+    TAB_COMMAND,
+    TAB_REMINDER,
+    TAB_ALIASES,
+    TAB_NOTES,
+    TAB_GALLERY,
+    TAB_HISTORY,
+)
 
 /**
  * E.V ki main screen \u2014 HUD look.
@@ -123,9 +137,16 @@ private val tabs = listOf(TAB_COMMAND, TAB_NOTES, TAB_GALLERY, TAB_HISTORY)
  * soch raha hai. Settings aur orb editor poore page hain \u2014 khulte hi home
  * screen (header, tabs, command box) chhup jaati hai, taaki lamba content
  * chhoti khidki me na thusa lage. Back arrow se wapas.
+ *
+ * @param autoListen bubble se aaye ho aur seedha bolna hai
+ * @param autoCommand bubble se aayi hui command, jo khud chal jaye
  */
 @Composable
-fun LauncherScreen(modifier: Modifier = Modifier) {
+fun LauncherScreen(
+    autoListen: Boolean = false,
+    autoCommand: String? = null,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -499,6 +520,19 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         if (pendingAsk != null) startListening()
     }
 
+    /** Bubble se aaye ho \u2014 seedha mic, ya bheji hui command. */
+    LaunchedEffect(autoListen, autoCommand) {
+        if (!autoCommand.isNullOrBlank()) {
+            input = autoCommand
+            runCommand(autoCommand)
+            return@LaunchedEffect
+        }
+        if (autoListen) {
+            delay(250L)
+            startListening()
+        }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = EvBlack,
@@ -585,6 +619,10 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                                 orbStyle = orbStyle,
                                 onOrbTap = { showOrbEditor = true },
                             )
+
+                            TAB_REMINDER -> RemindersPane(onNotify = { notify(it) })
+
+                            TAB_ALIASES -> AliasesPane(onNotify = { notify(it) })
 
                             TAB_NOTES -> NotesPane(
                                 notes = Notes.items,
@@ -732,14 +770,14 @@ private fun askFor(raw: String): PendingAsk? {
     val koIndex = words.indexOf("ko")
     val name = if (koIndex > 0) words.take(koIndex).joinToString(" ") else ""
 
-    // "note karo" — par likhna kya hai?
+    // "note karo" \u2014 par likhna kya hai?
     if (askHasWord(text, "note") && words.size <= 4) {
-        return PendingAsk("Kya note karun?") { answer -> "note karo $answer" }
+        return PendingAsk("Kya note karun?") { answer -> "note karo " + answer }
     }
 
-    // "call lagao" — kisko?
+    // "call lagao" \u2014 kisko?
     if ((askHasWord(text, "call") || askHasWord(text, "dial")) && name.isEmpty()) {
-        return PendingAsk("Kisko call karun?") { answer -> "$answer ko call karo" }
+        return PendingAsk("Kisko call karun?") { answer -> answer + " ko call karo" }
     }
 
     val messageish = askHasWord(text, "message") || askHasWord(text, "msg") ||
@@ -747,11 +785,11 @@ private fun askFor(raw: String): PendingAsk? {
         askHasWord(text, "bhejo") || askHasWord(text, "bhej")
 
     if (messageish) {
-        // Naam mil chuka hai par matter nahi — ab wo poochte hain.
+        // Naam mil chuka hai par matter nahi \u2014 ab wo poochte hain.
         if (name.isNotEmpty()) {
-            return PendingAsk("Kya message bhejun?") { answer -> "$name ko bolo ki $answer" }
+            return PendingAsk("Kya message bhejun?") { answer -> name + " ko bolo ki " + answer }
         }
-        return PendingAsk("Kisko bhejna hai?") { answer -> "$answer ko message bhejo" }
+        return PendingAsk("Kisko bhejna hai?") { answer -> answer + " ko message bhejo" }
     }
 
     val hasNumber = text.any { it.isDigit() }
@@ -759,29 +797,29 @@ private fun askFor(raw: String): PendingAsk? {
     if (askHasWord(text, "alarm") && !hasNumber) {
         return PendingAsk("Kitne baje ka alarm?") { answer ->
             val clean = askNormalize(answer)
-            if (askHasWord(clean, "baje")) "$clean alarm lagao" else "$clean baje alarm lagao"
+            if (askHasWord(clean, "baje")) clean + " alarm lagao" else clean + " baje alarm lagao"
         }
     }
 
     if (askHasWord(text, "timer") && !hasNumber) {
         return PendingAsk("Kitne minute ka timer?") { answer ->
             val clean = askNormalize(answer)
-            if (askHasWord(clean, "timer")) clean else "$clean ka timer lagao"
+            if (askHasWord(clean, "timer")) clean else clean + " ka timer lagao"
         }
     }
 
-    // "gaana lagao" — kaunsa?
+    // "gaana lagao" \u2014 kaunsa?
     val songish = askHasWord(text, "gaana") || askHasWord(text, "gana") ||
         askHasWord(text, "song") || askHasWord(text, "music")
     if (songish && words.size <= 4) {
-        return PendingAsk("Kaunsa gaana lagau?") { answer -> "youtube pe $answer lagao" }
+        return PendingAsk("Kaunsa gaana lagau?") { answer -> "youtube pe " + answer + " lagao" }
     }
 
-    // Sirf "kholo" — kaunsi app?
+    // Sirf "kholo" \u2014 kaunsi app?
     if (words.size <= 2 && (askHasWord(text, "kholo") || askHasWord(text, "khol") ||
             askHasWord(text, "open"))
     ) {
-        return PendingAsk("Kaunsi app kholun?") { answer -> "$answer kholo" }
+        return PendingAsk("Kaunsi app kholun?") { answer -> answer + " kholo" }
     }
 
     return null
@@ -846,6 +884,160 @@ private fun CommandPane(
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 12.dp),
         )
+    }
+}
+
+/**
+ * Jo yaad dilane ko kaha tha.
+ *
+ * Pehle ye Settings me chhupa tha, jo galat jagah thi \u2014 setting ek baar
+ * karte ho, reminder roz dekhte ho. Ab ye apna tab hai.
+ */
+@Composable
+private fun RemindersPane(
+    onNotify: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val formatter = remember { SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()) }
+
+    var refresh by remember { mutableStateOf(0) }
+    var items by remember { mutableStateOf<List<Reminder>>(emptyList()) }
+
+    LaunchedEffect(refresh) { items = Reminders.upcoming(context) }
+
+    if (items.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "KOI REMINDER NAHI\n\n\"2 MINUTE BAAD YAAD DILANA PAANI PEENA HAI\" BOLO",
+                color = EvTextMuted,
+                fontSize = 13.sp,
+                letterSpacing = 1.2.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 12.dp),
+    ) {
+        item { HudSectionLabel("// aane wale (" + items.size + ")") }
+
+        items(items, key = { it.id }) { reminder ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(EvSurfaceHigh)
+                    .border(BorderStroke(1.dp, EvOutline), RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = reminder.text, color = EvTextPrimary, fontSize = 14.sp)
+                    Text(
+                        text = formatter.format(Date(reminder.at)),
+                        color = EvGreen,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(
+                    text = "\u2715",
+                    color = EvTextMuted,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            Reminders.cancel(context, reminder.id)
+                            refresh++
+                            onNotify("Reminder hata diya")
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Galat suni gayi naam ki list.
+ *
+ * Recognizer "Kais" ko "case" likh deta hai. Har phone aur har contact pe ye
+ * alag hota hai, isliye list user ki apni hai.
+ */
+@Composable
+private fun AliasesPane(
+    onNotify: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf(EvSettings.aliasesRaw(context)) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        HudSectionLabel("// naam ki list")
+
+        Text(
+            text = "Ek line me ek: pehle jo suna jata hai, phir asli naam.\n\n" +
+                "case = Kais\na man = Armaan",
+            color = EvTextMuted,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp),
+            singleLine = false,
+            shape = RoundedCornerShape(14.dp),
+            placeholder = { Text("case = Kais", color = EvTextMuted, fontSize = 14.sp) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = EvTextPrimary,
+                unfocusedTextColor = EvTextPrimary,
+                focusedBorderColor = EvGreen,
+                unfocusedBorderColor = EvOutline,
+                cursorColor = EvGreen,
+                focusedContainerColor = EvSurfaceHigh,
+                unfocusedContainerColor = EvSurfaceHigh,
+            ),
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp, bottom = 16.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(EvGreen.copy(alpha = 0.10f))
+                .border(BorderStroke(1.5.dp, EvGreen), RoundedCornerShape(14.dp))
+                .clickable {
+                    EvSettings.setAliasesRaw(context, text)
+                    onNotify("Naam ki list save ho gayi")
+                }
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "SAVE",
+                color = EvGreen,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+            )
+        }
     }
 }
 
