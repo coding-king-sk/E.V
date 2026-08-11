@@ -13,6 +13,7 @@ import android.os.Build
 import android.provider.Settings
 import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.launcher.AppLauncher
+import kotlin.math.roundToInt
 
 /**
  * Phone ke hardware/system toggles.
@@ -30,7 +31,10 @@ object DeviceControls {
 
     fun isTorchOn(): Boolean = torchOn
 
-    fun run(context: Context, action: DeviceAction): DeviceResult = when (action) {
+    /**
+     * @param level sirf VOLUME_SET / BRIGHTNESS_SET ke liye \u2014 0 se 100 percent.
+     */
+    fun run(context: Context, action: DeviceAction, level: Int? = null): DeviceResult = when (action) {
         DeviceAction.TORCH_ON -> setTorch(context, true)
         DeviceAction.TORCH_OFF -> setTorch(context, false)
         DeviceAction.TORCH_TOGGLE -> setTorch(context, !torchOn)
@@ -56,11 +60,16 @@ object DeviceControls {
         DeviceAction.VOLUME_DOWN -> adjustVolume(context, AudioManager.ADJUST_LOWER, "Volume kam kar diya")
         DeviceAction.VOLUME_MAX -> maxVolume(context)
         DeviceAction.VOLUME_MUTE -> muteVolume(context)
+        DeviceAction.VOLUME_SET -> setVolumePercent(context, level ?: 50)
 
         DeviceAction.BRIGHTNESS_UP -> setBrightness(context, delta = 51)
         DeviceAction.BRIGHTNESS_DOWN -> setBrightness(context, delta = -51)
         DeviceAction.BRIGHTNESS_MAX -> setBrightness(context, absolute = 255)
         DeviceAction.BRIGHTNESS_MIN -> setBrightness(context, absolute = 10)
+        DeviceAction.BRIGHTNESS_SET -> setBrightness(
+            context,
+            absolute = percentToBrightness(level ?: 50),
+        )
 
         DeviceAction.RINGER_SILENT -> setRinger(context, AudioManager.RINGER_MODE_SILENT, "Silent mode on")
         DeviceAction.RINGER_VIBRATE -> setRinger(context, AudioManager.RINGER_MODE_VIBRATE, "Vibrate mode on")
@@ -172,6 +181,27 @@ object DeviceControls {
         return DeviceResult(true, "Volume mute")
     }
 
+    /**
+     * "volume 60% karo".
+     *
+     * Phone ke volume steps 15 ke aas-paas hote hain, isliye percent ko steps
+     * me badalte waqt round karna zaroori hai \u2014 warna 60% pe 8 ki jagah 9
+     * step ban jata hai.
+     */
+    private fun setVolumePercent(context: Context, percent: Int): DeviceResult {
+        val audio = audioManager(context) ?: return DeviceResult(false, "Audio service nahi mila")
+        val safe = percent.coerceIn(0, 100)
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val target = ((max * safe) / 100f).roundToInt().coerceIn(0, max)
+
+        return runCatching {
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, AudioManager.FLAG_SHOW_UI)
+            DeviceResult(true, "Volume $safe%")
+        }.getOrElse {
+            DeviceResult(false, "Volume set nahi ho paya")
+        }
+    }
+
     private fun setRinger(context: Context, mode: Int, message: String): DeviceResult {
         val notifications =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -195,6 +225,10 @@ object DeviceControls {
     }
 
     // ----------------------------------------------------------- brightness
+
+    /** Android brightness 0-255 me rakhta hai, log percent me bolte hain. */
+    private fun percentToBrightness(percent: Int): Int =
+        ((percent.coerceIn(0, 100) * 255) / 100).coerceIn(1, 255)
 
     private fun setBrightness(
         context: Context,

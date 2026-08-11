@@ -18,10 +18,16 @@ enum class DeviceAction {
     VOLUME_MAX,
     VOLUME_MUTE,
 
+    /** "volume 60% karo" \u2014 percent DeviceControls ko level me milta hai. */
+    VOLUME_SET,
+
     BRIGHTNESS_UP,
     BRIGHTNESS_DOWN,
     BRIGHTNESS_MAX,
     BRIGHTNESS_MIN,
+
+    /** "brightness 40% karo" \u2014 percent DeviceControls ko level me milta hai. */
+    BRIGHTNESS_SET,
 
     RINGER_SILENT,
     RINGER_VIBRATE,

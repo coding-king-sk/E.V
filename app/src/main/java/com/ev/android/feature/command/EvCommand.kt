@@ -56,18 +56,22 @@ sealed interface EvCommand {
     /** "kal subah 8 baje yaad dilana ki dawai leni hai" */
     data class Reminder(val at: Long, val text: String) : EvCommand
 
-    /** "torch on karo" */
-    data class Device(val action: DeviceAction) : EvCommand
+    /**
+     * "torch on karo", "volume 60% karo"
+     *
+     * @param level sirf VOLUME_SET / BRIGHTNESS_SET ke liye \u2014 0 se 100 percent.
+     */
+    data class Device(val action: DeviceAction, val level: Int? = null) : EvCommand
 
     /**
      * "photo lo" / "selfie lo"
      *
-     * Camera khulta hai aur photo khud-ba-khud click ho jati hai — user ko
+     * Camera khulta hai aur photo khud-ba-khud click ho jati hai \u2014 user ko
      * shutter dabane ki zaroorat nahi.
      */
     data class TakePhoto(val front: Boolean) : EvCommand
 
-    /** "30 second ka video banao" — recording khud shuru aur khud band. */
+    /** "30 second ka video banao" \u2014 recording khud shuru aur khud band. */
     data class RecordVideo(val front: Boolean, val seconds: Int) : EvCommand
 
     /**
@@ -82,10 +86,10 @@ sealed interface EvCommand {
      * "torch on karo aur whatsapp kholo"
      *
      * Ek hi vaakya me kai kaam. Ek ke baad ek chalte hain, beech me thoda gap
-     * rakh ke — warna doosri app pehli ke khulne se pehle hi launch ho jati hai.
+     * rakh ke \u2014 warna doosri app pehli ke khulne se pehle hi launch ho jati hai.
      */
     data class Multi(val commands: List<EvCommand>) : EvCommand
 
-    /** Kuch samajh nahi aaya — aage AI koshish karega. */
+    /** Kuch samajh nahi aaya \u2014 aage AI koshish karega. */
     data class Unknown(val raw: String) : EvCommand
 }
