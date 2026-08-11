@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 /**
  * App ki saari settings ek jagah, poori screen pe cards ke roop me.
  *
- * Groq API key ka field yahan jaan-boojh ke nahi hai — wo home screen ke
+ * Groq API key ka field yahan jaan-boojh ke nahi hai \u2014 wo home screen ke
  * API KEY button me hai. Ek hi cheez do jagah rakhne se ye confusion hota tha
  * ki kaunsi wali asli hai.
  */
@@ -45,6 +45,10 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
     var aiOn by remember { mutableStateOf(EvSettings.aiEnabled(context)) }
     var personalOn by remember { mutableStateOf(EvSettings.sendPersonalToAi(context)) }
     var whisperOn by remember { mutableStateOf(EvSettings.whisperStt(context)) }
+
+    var autoSend by remember { mutableStateOf(EvSettings.whatsappAutoSend(context)) }
+    var autoType by remember { mutableStateOf(EvSettings.autoType(context)) }
+    var aliases by remember { mutableStateOf(EvSettings.aliasesRaw(context)) }
 
     var offlineWake by remember { mutableStateOf(EvSettings.offlineWakeWord(context)) }
     var modelUrl by remember { mutableStateOf(EvSettings.wakeWordModelUrl(context)) }
@@ -62,6 +66,9 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
             EvSettings.setAiEnabled(context, aiOn)
             EvSettings.setSendPersonalToAi(context, personalOn)
             EvSettings.setWhisperStt(context, whisperOn)
+            EvSettings.setWhatsappAutoSend(context, autoSend)
+            EvSettings.setAutoType(context, autoType)
+            EvSettings.setAliasesRaw(context, aliases)
             EvSettings.setOfflineWakeWord(context, offlineWake)
             EvSettings.setWakeWordModelUrl(context, modelUrl)
             EvSettings.setWakeWordKeywords(context, keywords)
@@ -73,9 +80,50 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
     ) {
 
         // Onboarding hat gaya hai, isliye permissions ka poora hisaab ab yahan
-        // sabse upar hai — typing/auto-send wali accessibility bhi isi list me.
+        // sabse upar hai \u2014 typing/auto-send wali accessibility bhi isi list me.
         EvSectionHeader("Permissions")
         PermissionsSection()
+
+        EvSectionHeader("Messaging")
+
+        EvToggleCard(
+            title = "WhatsApp auto send",
+            subtitle = "On: message khud chala jayega. Off: chat khul jayega aur " +
+                "message likha hua milega, send aap dabaoge. Dono me Accessibility " +
+                "on hona zaroori hai.",
+            checked = autoSend,
+            onChange = { autoSend = it },
+        )
+
+        EvToggleCard(
+            title = "Auto type",
+            subtitle = "\"Instagram pe type karo hello\" jaise command. Off karoge to " +
+                "E.V kisi app ke text box me kuch nahi likhega.",
+            checked = autoType,
+            onChange = { autoType = it },
+        )
+
+        EvSectionHeader("Naam ki galtiyan (aliases)")
+
+        EvCard {
+            EvCardTitle("Galat suna jaata hai?")
+            EvCardSubtitle(
+                "Speech recognizer Hinglish naam angrezi shabdon me badal deta hai \u2014 " +
+                    "\"Kais\" ko \"case\". Har phone aur har contact ke liye ye alag hota " +
+                    "hai, isliye ise app me fix karna theek nahi. Yahan ek line me ek " +
+                    "jodi likho:\n\ncase = Kais\na man = Armaan"
+            )
+            OutlinedTextField(
+                value = aliases,
+                onValueChange = { aliases = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                minLines = 3,
+                placeholder = { Text("case = Kais") },
+                colors = evFieldColors(),
+            )
+        }
 
         EvSectionHeader("AI")
 
@@ -188,7 +236,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
         EvCard {
             EvCardTitle("Keyword")
             EvCardSubtitle(
-                "Seedha \"E.V\" likhne se kaam nahi chalega — keyword model ke " +
+                "Seedha \"E.V\" likhne se kaam nahi chalega \u2014 keyword model ke " +
                     "tokens me likhna padta hai. Khaali chhod do to model ki apni " +
                     "keywords.txt chalegi."
             )
@@ -210,7 +258,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                     .fillMaxWidth()
                     .padding(top = 10.dp),
                 singleLine = true,
-                placeholder = { Text("Model URL — khaali = default") },
+                placeholder = { Text("Model URL \u2014 khaali = default") },
                 colors = evFieldColors(),
             )
         }
