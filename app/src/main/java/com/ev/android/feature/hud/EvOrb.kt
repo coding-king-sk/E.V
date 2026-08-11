@@ -1,5 +1,6 @@
 package com.ev.android.feature.hud
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -12,123 +13,181 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import com.ev.android.ui.theme.EvGreen
+import androidx.compose.ui.graphics.Color
 import com.ev.android.ui.theme.EvGreenGlow
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Ghoomta hua bindiyon ka globe.
+ * Ek dot se bana ghoomta hua globe \u2014 E.V ka chehra.
  *
- * GIF ko seedha chalane ke liye ek image library (Coil) chahiye hoti, sirf ek
- * animation ke liye. Isliye wahi cheez yahan Canvas pe banayi gayi hai — na
- * extra library, na kisi screen size pe blur.
+ * Design reference se do cheezein aati hain:
+ *  1. Dots latitude ki seedhi lines me hain (bikhre hue nahi). Isi se wo
+ *     "wireframe globe" wala look aata hai; random dots noise lagte hain.
+ *  2. Sphere thoda tilt hai, isliye upar-neeche ke rings ellipse dikhte hain
+ *     aur globe flat circle ki jagah 3D lagta hai.
+ *
+ * Equator aur poles ke paas ki rings jaan-boojh ke zyada bright hain \u2014
+ * reference me wahi lines sabse pehle aankh me aati hain.
  */
-private class Dot(val x: Float, val y: Float, val z: Float)
+private class OrbDot(
+    val x: Float,
+    val y: Float,
+    val z: Float,
+    val bright: Boolean,
+)
 
-/**
- * Golden-angle spiral: sphere pe [count] point barabar failane ka sabse saaf
- * tareeka. Latitude/longitude grid se karte to dono poles pe dots ka gucchha
- * ban jata.
- */
-private fun evenlySpread(count: Int): List<Dot> {
-    val golden = PI * (3.0 - sqrt(5.0))
-    return (0 until count).map { i ->
-        val y = 1.0 - (i / (count - 1.0)) * 2.0
-        val radius = sqrt((1.0 - y * y).coerceAtLeast(0.0))
-        val theta = golden * i
-        Dot(
-            x = (cos(theta) * radius).toFloat(),
-            y = y.toFloat(),
-            z = (sin(theta) * radius).toFloat(),
+/** Kitni latitude lines \u2014 isse zyada karne pe sirf GPU load badhta hai. */
+private const val ROWS = 46
+
+/** Equator pe itne dots; upar-neeche row chhoti hoti jati hai. */
+private const val EQUATOR_DOTS = 56
+
+/** Sphere ka jhukav \u2014 iske bina pole rings seedhi line dikhti hain. */
+private const val TILT_DEGREES = 14.0
+
+private fun ringAt(y: Float, count: Int, bright: Boolean, into: MutableList<OrbDot>) {
+    val radius = sqrt((1f - y * y).coerceAtLeast(0f))
+    for (i in 0 until count) {
+        val angle = 2.0 * PI * i / count
+        into.add(
+            OrbDot(
+                x = (radius * cos(angle)).toFloat(),
+                y = y,
+                z = (radius * sin(angle)).toFloat(),
+                bright = bright,
+            )
         )
     }
 }
 
-/** Ek horizontal chhalla — equator aur poles ke paas ki lakeeron ke liye. */
-private fun ring(y: Float, count: Int): List<Dot> {
-    val radius = sqrt((1f - y * y).coerceAtLeast(0f))
-    return (0 until count).map { i ->
-        val angle = 2.0 * PI * i / count
-        Dot(
-            x = (cos(angle) * radius).toFloat(),
-            y = y,
-            z = (sin(angle) * radius).toFloat(),
-        )
+/**
+ * Sphere ek hi baar banta hai aur har frame me sirf ghumaya jata hai \u2014
+ * ~1600 dots har frame banana bekaar ka kaam hota.
+ */
+private fun buildSphere(): List<OrbDot> {
+    val dots = ArrayList<OrbDot>(1800)
+
+    for (row in 0 until ROWS) {
+        val theta = PI * (row + 0.5) / ROWS
+        val y = cos(theta).toFloat()
+        val radius = sin(theta).toFloat()
+        val count = max(6, (EQUATOR_DOTS * radius).roundToInt())
+
+        for (i in 0 until count) {
+            val angle = 2.0 * PI * i / count
+            dots.add(
+                OrbDot(
+                    x = (radius * cos(angle)).toFloat(),
+                    y = y,
+                    z = (radius * sin(angle)).toFloat(),
+                    bright = false,
+                )
+            )
+        }
     }
+
+    // Chamakne wali lines: beech ki teen (equator band) aur dono taraf ke rings.
+    ringAt(0f, 130, true, dots)
+    ringAt(0.035f, 128, true, dots)
+    ringAt(-0.035f, 128, true, dots)
+
+    for (y in listOf(0.86f, 0.93f, -0.86f, -0.93f)) {
+        val radius = sqrt((1f - y * y).coerceAtLeast(0f))
+        ringAt(y, max(14, (EQUATOR_DOTS * radius * 1.6f).roundToInt()), true, dots)
+    }
+
+    return dots
 }
 
 @Composable
 fun EvOrb(
     listening: Boolean,
     busy: Boolean,
-    dimmed: Boolean = false,
+    dimmed: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val active = listening || busy
-
-    // Dot set ek hi baar banta hai — har frame pe banane ki koi zaroorat nahi.
-    val dots = remember {
-        evenlySpread(1000) +
-            ring(0f, 150) +
-            ring(0.02f, 120) +
-            ring(-0.02f, 120) +
-            ring(0.78f, 84) +
-            ring(0.88f, 64) +
-            ring(0.94f, 44) +
-            ring(-0.78f, 84) +
-            ring(-0.88f, 64) +
-            ring(-0.94f, 44)
-    }
+    val dots = remember { buildSphere() }
 
     val transition = rememberInfiniteTransition(label = "orb")
 
-    val spin by transition.animateFloat(
+    // Sun-ne ya sochne ke waqt tez ghoomta hai \u2014 isse pata chalta hai ki
+    // app zinda hai. Idle me dheere, taaki battery aur aankh dono bache.
+    val spinMillis = if (listening || busy) 9000 else 22000
+    val angle by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(if (active) 7000 else 20000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
+        animationSpec = infiniteRepeatable(tween(spinMillis, easing = LinearEasing)),
         label = "spin",
     )
 
     val pulse by transition.animateFloat(
-        initialValue = 0.97f,
-        targetValue = if (active) 1.06f else 1.00f,
+        initialValue = 0.975f,
+        targetValue = 1.035f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (active) 900 else 2600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
+            tween(2200, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
         ),
         label = "pulse",
     )
 
-    val fade = if (dimmed) 0.75f else 1f
+    // Reference me orb safed/chandi jaisa hai. Sun-ne ke waqt halki hari
+    // chamak aati hai taaki bina text padhe pata chal jaye ki mic on hai.
+    val base = Color(0xFFEAF2EC)
+    val accent = if (listening || busy) EvGreenGlow else base
 
     Canvas(modifier = modifier) {
-        val radius = size.minDimension / 2f * 0.92f * pulse
-        val cx = size.width / 2f
-        val cy = size.height / 2f
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = (size.minDimension / 2f) * 0.92f * pulse
+        val dotScale = radius / 150f
 
-        val angle = spin * PI.toFloat() / 180f
-        val cosA = cos(angle)
-        val sinA = sin(angle)
+        val spin = Math.toRadians(angle.toDouble())
+        val cosSpin = cos(spin).toFloat()
+        val sinSpin = sin(spin).toFloat()
+
+        val tilt = Math.toRadians(TILT_DEGREES)
+        val cosTilt = cos(tilt).toFloat()
+        val sinTilt = sin(tilt).toFloat()
+
+        val fade = if (dimmed) 0.45f else 1f
+
+        // Peeche ki halki roshni \u2014 orb kaale background pe tairta hua lagta hai.
+        drawCircle(
+            color = accent.copy(alpha = 0.05f * fade),
+            radius = radius * 1.06f,
+            center = center,
+        )
 
         dots.forEach { dot ->
-            // Y-axis ke around ghumao.
-            val x = dot.x * cosA + dot.z * sinA
-            val z = -dot.x * sinA + dot.z * cosA
+            // Pehle Y-axis pe ghumao (ye globe ka spin hai)…
+            val x1 = dot.x * cosSpin + dot.z * sinSpin
+            val z1 = -dot.x * sinSpin + dot.z * cosSpin
 
-            // z = -1 (sabse peeche) .. +1 (sabse aage) -> 0..1
-            val depth = (z + 1f) / 2f
+            // …phir sphere ko thoda jhukao, taaki upar ka ring dikhe.
+            val y1 = dot.y * cosTilt - z1 * sinTilt
+            val z2 = dot.y * sinTilt + z1 * cosTilt
+
+            // Aage wale dots bade aur bright, peeche wale chhote aur dhundhle \u2014
+            // isi se depth ka ehsaas hota hai.
+            val depth = ((z2 + 1f) / 2f).coerceIn(0f, 1f)
+
+            val alpha = ((if (dot.bright) 0.45f else 0.22f) + depth * 0.7f)
+                .coerceIn(0f, 1f) * fade
+
+            val dotRadius = (if (dot.bright) 1.55f else 1.2f) *
+                (0.55f + depth * 0.95f) * dotScale
 
             drawCircle(
-                color = if (depth > 0.5f) EvGreenGlow else EvGreen,
-                radius = radius * (0.005f + 0.010f * depth * depth),
-                center = Offset(cx + x * radius, cy + dot.y * radius),
-                alpha = ((0.16f + 0.84f * depth * depth) * fade).coerceIn(0f, 1f),
+                color = (if (dot.bright) accent else base).copy(alpha = alpha),
+                radius = dotRadius,
+                center = Offset(
+                    x = center.x + x1 * radius,
+                    y = center.y - y1 * radius,
+                ),
             )
         }
     }
