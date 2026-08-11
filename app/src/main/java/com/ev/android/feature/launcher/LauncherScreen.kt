@@ -103,6 +103,7 @@ import com.ev.android.ui.theme.EvOutline
 import com.ev.android.ui.theme.EvSurfaceHigh
 import com.ev.android.ui.theme.EvTextMuted
 import com.ev.android.ui.theme.EvTextPrimary
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -135,6 +136,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var busy by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<EvCommand?>(null) }
+    var pendingAsk by remember { mutableStateOf<PendingAsk?>(null) }
     var apiKeySet by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
@@ -311,7 +313,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 
         EvListeningService.start(context)
         handsFree = true
-        notify("Ab bas \"Hey E.V\" bolo")
+        notify("Ab bas \"Hey " + EvSettings.wakeName(context) + "\" bolo")
     }
 
     /** Mic button ke liye hands-free ko thoda der ke liye rok ke wapas chalu. */
@@ -354,16 +356,44 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     /**
      * Teen seedhiyan: offline parser -> AI se command -> AI se seedha jawab.
      *
-     * Roz ke command turant aur free me chalte hain; network sirf tab lagta
-     * hai jab baat ghumavdar ho ya sawaal ho.
+     * Beech me ek chauthi cheez bhi hai: agar baat **adhoori** lagti hai
+     * ("message bhejo" par kisko nahi bataya), to E.V "samajh nahi aaya"
+     * bolne ki jagah **sawaal** puchta hai aur agla jawab usi command me jod
+     * deta hai.
+     *
+     * @param askedBefore pichla sawaal, taaki wahi sawaal bar bar na puche.
      */
-    fun runCommand(text: String) {
+    fun runCommand(text: String, askedBefore: String? = null) {
         if (text.isBlank()) return
         keyboard?.hide()
+
+        // Pehle se koi sawaal poocha hua hai? To ye uska jawab hai.
+        val waiting = pendingAsk
+        if (waiting != null) {
+            pendingAsk = null
+
+            if (isCancelAnswer(text)) {
+                status = "THEEK HAI, RAHNE DETE HAIN"
+                return
+            }
+
+            runCommand(waiting.rebuild(text.trim()), waiting.question)
+            return
+        }
 
         val parsed = CommandParser.parse(text, installedApps)
         if (parsed !is EvCommand.Unknown) {
             handle(parsed, text)
+            return
+        }
+
+        // Adhoori baat \u2014 poochh lete hain. Wahi sawaal dobara nahi puchte,
+        // warna do log aamne saamne sawaal karte reh jayenge.
+        val ask = askFor(text)
+        if (ask != null && ask.question != askedBefore) {
+            pendingAsk = ask
+            status = ask.question.uppercase()
+            if (speakReplies) Speaker.speak(ask.question)
             return
         }
 
@@ -455,6 +485,18 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 },
             )
         }
+    }
+
+    /**
+     * Sawaal poochte hi mic khud khul jata hai \u2014 jawab dene ke liye button
+     * dabana pade to poora faayda hi chala jata hai.
+     *
+     * Thoda ruk ke, taaki E.V apna hi sawaal na sun le.
+     */
+    LaunchedEffect(pendingAsk) {
+        val ask = pendingAsk ?: return@LaunchedEffect
+        delay(900L + ask.question.length * 55L)
+        if (pendingAsk != null) startListening()
     }
 
     Scaffold(
@@ -577,6 +619,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                         onStop = {
                             Speaker.stop()
                             listening = false
+                            pendingAsk = null
                             resumeHandsFree()
                             status = "READY \u2014 BOLO YA LIKHO"
                         },
@@ -642,6 +685,106 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             },
         )
     }
+}
+
+// --------------------------------------------------------------- sawaal-jawab
+
+/**
+ * Ek adhoori command aur uska sawaal.
+ *
+ * [rebuild] jawab ko wapas ek poore vaakya me jod deta hai, jise phir wahi
+ * purana parser padhta hai. Isse koi naya command type banane ki zaroorat
+ * nahi padi \u2014 jitna kam naya code, utni kam nayi galtiyan.
+ */
+private data class PendingAsk(
+    val question: String,
+    val rebuild: (String) -> String,
+)
+
+private fun askNormalize(input: String): String = input
+    .lowercase()
+    .replace(Regex("[?!.,;:\"']"), " ")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+
+private fun askHasWord(text: String, word: String): Boolean =
+    Regex("(^|\\s)" + Regex.escape(word) + "($|\\s)").containsMatchIn(text)
+
+private val cancelAnswers = setOf(
+    "cancel", "rehne do", "rahne do", "chhodo", "chodo", "chhod do",
+    "kuch nahi", "koi nahi", "nahi", "no", "band karo", "stop",
+)
+
+private fun isCancelAnswer(text: String): Boolean = askNormalize(text) in cancelAnswers
+
+/**
+ * Baat adhoori lagi to uska sawaal, warna null.
+ *
+ * Yahan sirf wahi soorat pakadte hain jahan **saaf** pata ho ki kya cheez
+ * kam hai. Shak hone par kuch nahi puchte \u2014 galat sawaal "samajh nahi aaya"
+ * se bhi zyada chidhata hai.
+ */
+private fun askFor(raw: String): PendingAsk? {
+    val text = askNormalize(raw)
+    if (text.isEmpty()) return null
+
+    val words = text.split(" ")
+    val koIndex = words.indexOf("ko")
+    val name = if (koIndex > 0) words.take(koIndex).joinToString(" ") else ""
+
+    // "note karo" — par likhna kya hai?
+    if (askHasWord(text, "note") && words.size <= 4) {
+        return PendingAsk("Kya note karun?") { answer -> "note karo $answer" }
+    }
+
+    // "call lagao" — kisko?
+    if ((askHasWord(text, "call") || askHasWord(text, "dial")) && name.isEmpty()) {
+        return PendingAsk("Kisko call karun?") { answer -> "$answer ko call karo" }
+    }
+
+    val messageish = askHasWord(text, "message") || askHasWord(text, "msg") ||
+        askHasWord(text, "sms") || askHasWord(text, "whatsapp") ||
+        askHasWord(text, "bhejo") || askHasWord(text, "bhej")
+
+    if (messageish) {
+        // Naam mil chuka hai par matter nahi — ab wo poochte hain.
+        if (name.isNotEmpty()) {
+            return PendingAsk("Kya message bhejun?") { answer -> "$name ko bolo ki $answer" }
+        }
+        return PendingAsk("Kisko bhejna hai?") { answer -> "$answer ko message bhejo" }
+    }
+
+    val hasNumber = text.any { it.isDigit() }
+
+    if (askHasWord(text, "alarm") && !hasNumber) {
+        return PendingAsk("Kitne baje ka alarm?") { answer ->
+            val clean = askNormalize(answer)
+            if (askHasWord(clean, "baje")) "$clean alarm lagao" else "$clean baje alarm lagao"
+        }
+    }
+
+    if (askHasWord(text, "timer") && !hasNumber) {
+        return PendingAsk("Kitne minute ka timer?") { answer ->
+            val clean = askNormalize(answer)
+            if (askHasWord(clean, "timer")) clean else "$clean ka timer lagao"
+        }
+    }
+
+    // "gaana lagao" — kaunsa?
+    val songish = askHasWord(text, "gaana") || askHasWord(text, "gana") ||
+        askHasWord(text, "song") || askHasWord(text, "music")
+    if (songish && words.size <= 4) {
+        return PendingAsk("Kaunsa gaana lagau?") { answer -> "youtube pe $answer lagao" }
+    }
+
+    // Sirf "kholo" — kaunsi app?
+    if (words.size <= 2 && (askHasWord(text, "kholo") || askHasWord(text, "khol") ||
+            askHasWord(text, "open"))
+    ) {
+        return PendingAsk("Kaunsi app kholun?") { answer -> "$answer kholo" }
+    }
+
+    return null
 }
 
 /**
