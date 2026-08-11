@@ -26,14 +26,10 @@ import com.ev.android.feature.hud.EvSectionHeader
 import com.ev.android.feature.hud.EvToggleCard
 import com.ev.android.feature.hud.evFieldColors
 import com.ev.android.feature.permissions.PermissionsSection
-import com.ev.android.feature.reminders.Reminders
 import com.ev.android.feature.wakeword.SherpaWakeWord
 import com.ev.android.feature.wakeword.WakeWordModel
 import com.ev.android.ui.theme.EvRed
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * App ki saari settings \u2014 poore page me.
@@ -41,6 +37,10 @@ import java.util.Locale
  * Groq API key ka field yahan jaan-boojh ke nahi hai \u2014 wo home screen ke
  * API KEY button me hai. Ek hi cheez do jagah rakhne se ye confusion hota tha
  * ki kaunsi wali asli hai.
+ *
+ * Reminders aur naam ki galtiyan (aliases) bhi ab yahan nahi hain. Wo roz
+ * kaam aane wali cheezen hain, aur settings saal me ek baar khulti hai \u2014
+ * isliye dono home screen ke apne tab me chale gaye hain.
  */
 @Composable
 fun SettingsPanel(
@@ -57,16 +57,11 @@ fun SettingsPanel(
 
     var autoSend by remember { mutableStateOf(EvSettings.whatsappAutoSend(context)) }
     var autoType by remember { mutableStateOf(EvSettings.autoType(context)) }
-    var aliases by remember { mutableStateOf(EvSettings.aliasesRaw(context)) }
 
     var bubbleOn by remember { mutableStateOf(EvSettings.bubbleEnabled(context)) }
     var overlayOk by remember { mutableStateOf(Bubble.canShow(context)) }
 
     var wakeName by remember { mutableStateOf(EvSettings.wakeName(context)) }
-
-    var reminders by remember { mutableStateOf(Reminders.upcoming(context)) }
-    val notificationsOff = remember { Reminders.notificationsBlocked(context) }
-    val reminderClock = remember { SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()) }
 
     var offlineWake by remember { mutableStateOf(EvSettings.offlineWakeWord(context)) }
     var modelUrl by remember { mutableStateOf(EvSettings.wakeWordModelUrl(context)) }
@@ -87,7 +82,6 @@ fun SettingsPanel(
             EvSettings.setWhisperStt(context, whisperOn)
             EvSettings.setWhatsappAutoSend(context, autoSend)
             EvSettings.setAutoType(context, autoType)
-            EvSettings.setAliasesRaw(context, aliases)
             EvSettings.setWakeName(context, wakeName)
             EvSettings.setOfflineWakeWord(context, offlineWake)
             EvSettings.setWakeWordModelUrl(context, modelUrl)
@@ -145,9 +139,10 @@ fun SettingsPanel(
 
         EvToggleCard(
             title = "Bubble dikhao",
-            subtitle = "E.V ka orb har app ke upar tairta rahega. Tap karo to E.V " +
-                "khul jayega, ungli se jahan chaho khinch ke rakh do, aur lamba " +
-                "daba ke band kar do.",
+            subtitle = "E.V ka orb har app ke upar tairta rahega. Ek tap = neeche " +
+                "chhota bar, double tap = seedha mic. Khinch ke chhodoge to " +
+                "kinare pe chipak jayega, kuch der haath na lage to halka pad " +
+                "jayega, aur neeche X pe chhodoge ya lamba dabaoge to band.",
             checked = bubbleOn,
             onChange = { bubbleOn = it },
         )
@@ -194,73 +189,6 @@ fun SettingsPanel(
             checked = autoType,
             onChange = { autoType = it },
         )
-
-        // ------------------------------------------------------- reminders
-
-        EvSectionHeader("Reminders")
-
-        if (notificationsOff) {
-            EvCard {
-                Text(
-                    text = "\u26A0 Notifications band hain. Reminder ka waqt aane par E.V " +
-                        "bol to dega, par screen pe kuch nahi dikhega.",
-                    color = EvRed,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                )
-            }
-        }
-
-        if (reminders.isEmpty()) {
-            EvCard {
-                EvCardTitle("Abhi koi reminder nahi")
-                EvCardSubtitle(
-                    "Bol ke lagao: \"kal subah 8 baje yaad dilana ki dawai leni hai\" " +
-                        "ya \"2 minute baad yaad dilana paani peena hai\". Yahan list " +
-                        "me dikhega ki kab bajega \u2014 isse pata chal jata hai ki " +
-                        "reminder set hua ya nahi."
-                )
-            }
-        } else {
-            reminders.forEach { reminder ->
-                EvCard {
-                    EvCardTitle(reminder.text)
-                    EvCardSubtitle(reminderClock.format(Date(reminder.at)))
-
-                    Row(modifier = Modifier.padding(top = 4.dp)) {
-                        EvDialogButton(
-                            label = "Hatao",
-                            onClick = {
-                                Reminders.cancel(context, reminder.id)
-                                reminders = Reminders.upcoming(context)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
-        EvSectionHeader("Naam ki galtiyan (aliases)")
-
-        EvCard {
-            EvCardTitle("Galat suna jaata hai?")
-            EvCardSubtitle(
-                "Speech recognizer Hinglish naam angrezi shabdon me badal deta hai \u2014 " +
-                    "\"Kais\" ko \"case\". Har phone aur har contact ke liye ye alag hota " +
-                    "hai, isliye ise app me fix karna theek nahi. Yahan ek line me ek " +
-                    "jodi likho:\n\ncase = Kais\na man = Armaan"
-            )
-            OutlinedTextField(
-                value = aliases,
-                onValueChange = { aliases = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                minLines = 3,
-                placeholder = { Text("case = Kais") },
-                colors = evFieldColors(),
-            )
-        }
 
         EvSectionHeader("AI")
 
