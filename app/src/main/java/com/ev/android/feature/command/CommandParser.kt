@@ -22,6 +22,7 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "note karo khana khana hai"            -> Note("khana khana hai")
  *  "battery kitni hai"                    -> Info(BATTERY)
  *  "meri location batao"                  -> WhereAmI
+ *  "aaj mausam kaisa hai"                 -> Weather(0)
  *  "1500 ka 18% kitna hota hai"           -> Calculate
  *  "google pe sachin search karo"         -> WebSearch("sachin")
  *  "photo lo"                             -> TakePhoto(front = false)
@@ -30,7 +31,7 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *
  * Yahan spelling ki bahut saari shaklein jaan-boojh ke rakhi gayi hain. Google
  * ka recognizer Hinglish ko Latin script me likhta hai aur har baar ek jaisa
- * nahi likhta \u2014 "awaaz"/"awaz", "minut"/"mint", "bnao"/"banao". Ek bhi shakl
+ * nahi likhta — "awaaz"/"awaz", "minut"/"mint", "bnao"/"banao". Ek bhi shakl
  * chhoot jaye to poori command "samajh nahi aaya" ban jati hai.
  */
 object CommandParser {
@@ -86,7 +87,7 @@ object CommandParser {
     /**
      * Note likhne ke phrases.
      *
-     * Akela "note" nahi rakha \u2014 "note kholo" ya "notes dikhao" me user list
+     * Akela "note" nahi rakha — "note kholo" ya "notes dikhao" me user list
      * dekhna chahta hai, naya note nahi banana.
      */
     private val noteVerbs = listOf(
@@ -99,7 +100,7 @@ object CommandParser {
     /**
      * "Meri location batao".
      *
-     * Yahan "location" akela bhi kaafi nahi rakha \u2014 "location on karo" me user
+     * Yahan "location" akela bhi kaafi nahi rakha — "location on karo" me user
      * GPS chalu karna chahta hai, jawab nahi. Isliye har phrase me ya to
      * "meri/mera" hai ya poochne wala shabd.
      */
@@ -114,7 +115,7 @@ object CommandParser {
     /**
      * Photo ke phrases.
      *
-     * Akela "photo" jaan-boojh ke nahi rakha \u2014 warna "photo gallery kholo" bhi
+     * Akela "photo" jaan-boojh ke nahi rakha — warna "photo gallery kholo" bhi
      * camera chala deta. "selfie" akela theek hai, uska aur koi matlab nahi.
      */
     private val photoVerbs = listOf(
@@ -133,7 +134,7 @@ object CommandParser {
         "vidio banao", "vidio bnao",
         "video record karo", "video record", "record video",
         "video shoot karo", "video le lo", "video lo",
-        // "recording chalu karo" bol ke log seedha recording chahte hain \u2014 camera
+        // "recording chalu karo" bol ke log seedha recording chahte hain — camera
         // khol ke shutter dhoondhna nahi.
         "recording shuru karo", "recording shuru", "recording chalu karo",
         "recording chalu kar do", "recording chalu", "recording start karo",
@@ -159,7 +160,7 @@ object CommandParser {
      * Jodne wale chhote shabd.
      *
      * "per", "pey" aur "peh" isliye hain kyunki Google ka recognizer Hinglish
-     * me "pe" ko aksar "per" likh deta hai ("whatsapp per armaan ko\u2026"). Inhe
+     * me "pe" ko aksar "per" likh deta hai ("whatsapp per armaan ko…"). Inhe
      * yahan na rakhne se ye contact ke naam ka hissa ban jate the aur phir koi
      * contact match hi nahi hota tha.
      */
@@ -168,7 +169,7 @@ object CommandParser {
         "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke",
     )
 
-    /** Ek hi regex ke andar sab connectors \u2014 dono jagah yahi list chalti hai. */
+    /** Ek hi regex ke andar sab connectors — dono jagah yahi list chalti hai. */
     private const val CONNECTOR_PATTERN = "pe|per|pey|peh|par|pr|me|mein|main|on|in"
 
     private val messageNoiseWords = setOf(
@@ -179,7 +180,7 @@ object CommandParser {
     private val callNoiseWords =
         setOf("call", "phone", "dial", "lagao", "laga", "karo", "kar", "kardo", "do", "milao")
 
-    /** Reminder ke body me se ye sab nikal dena hai \u2014 ye time/verb ke shabd hain. */
+    /** Reminder ke body me se ye sab nikal dena hai — ye time/verb ke shabd hain. */
     private val reminderNoiseWords = setOf(
         "yaad", "dila", "dilado", "dilana", "dilao", "dena", "dijiye", "karana", "rakhna",
         "reminder", "remind", "set", "lagao", "laga", "karo", "kar", "kardo", "do",
@@ -204,7 +205,7 @@ object CommandParser {
     private val percentRegex =
         Regex("(\\d{1,3})\\s*(?:%|percent|persent|parsent|pratishat)")
 
-    /** "torch on karo AUR whatsapp kholo" \u2014 yahan se do kaam alag hote hain. */
+    /** "torch on karo AUR whatsapp kholo" — yahan se do kaam alag hote hain. */
     private val joinRegex =
         Regex("\\s+(?:aur|phir|fir|uske baad|uske bad|iske baad|baad me|then|and)\\s+")
 
@@ -275,13 +276,26 @@ object CommandParser {
         "aaj kya din", "aaj konsa din", "aaj kaun sa din", "today date", "tareekh kya",
     )
 
-    /** Sawaal poochne wale shabd \u2014 inke bina "battery" sirf ek shabd hai. */
+    /** Sawaal poochne wale shabd — inke bina "battery" sirf ek shabd hai. */
     private val askWords = listOf(
         "kitni", "kitna", "kitne", "kya", "batao", "bta", "bata", "bta do", "status",
         "bacha", "bachi", "baki", "remaining", "how much", "level",
     )
 
     private val googleWords = listOf("google", "gugal", "gogle", "googal")
+
+    /**
+     * Mausam ke shabd.
+     *
+     * "baarish" aur "temperature" bhi yahan hain kyunki log seedha wahi
+     * poochte hain — "kal baarish hogi kya", "abhi temperature kitna hai".
+     */
+    private val weatherWords = listOf(
+        "mausam", "mosam", "mausham", "mausm", "mousam",
+        "weather", "wether", "wheather",
+        "baarish", "barish", "barsat", "barsaat",
+        "temperature", "tapman", "garmi kitni", "thand kitni",
+    )
 
     // ---------------------------------------------------- device vocabulary
 
@@ -296,7 +310,7 @@ object CommandParser {
     /**
      * Awaaz kam karne ke shabd.
      *
-     * "dhime"/"dheeme" yahan isliye hain ki bologe "awaaz thodi dhime karo" \u2014
+     * "dhime"/"dheeme" yahan isliye hain ki bologe "awaaz thodi dhime karo" —
      * ye roz ka jumla hai aur pehle poora command hi samajh nahi aata tha.
      */
     private val downWords = listOf(
@@ -335,7 +349,7 @@ object CommandParser {
     private val notificationWords = listOf("notification", "notifications")
     private val settingsWords = listOf("settings", "setting")
 
-    /** Timer ke shabd \u2014 "time" isliye ki log "2 minut ka time lagao" bolte hain. */
+    /** Timer ke shabd — "time" isliye ki log "2 minut ka time lagao" bolte hain. */
     private val timerWords = listOf("timer", "taimer", "taymer", "time", "tym")
 
     /**
@@ -353,7 +367,7 @@ object CommandParser {
         val parts = splitCommands(normalized)
         if (parts.size > 1) {
             val commands = parts.map { parseSingle(it, it, installedApps) }
-            // Ek bhi hissa samajh na aaye to todna galat tha \u2014 poora vaakya
+            // Ek bhi hissa samajh na aaye to todna galat tha — poora vaakya
             // ek hi command hoga (jaise gaane ke naam me "aur" aa gaya ho).
             if (commands.none { it is EvCommand.Unknown }) {
                 return EvCommand.Multi(commands)
@@ -364,7 +378,7 @@ object CommandParser {
     }
 
     /**
-     * "aur / phir / then" pe todo \u2014 par sirf tab jab risky na ho.
+     * "aur / phir / then" pe todo — par sirf tab jab risky na ho.
      *
      * Message aur reminder ke body me "aur" bahut aata hai ("bolo ki main aa
      * raha hoon aur khana laga do"), isliye "ki" wale vaakya kabhi nahi tootte.
@@ -385,7 +399,7 @@ object CommandParser {
     ): EvCommand {
         if (normalized.isEmpty()) return EvCommand.Unknown(raw)
 
-        // Device toggles pehle \u2014 "torch on karo" ko app-launcher parse na kar de.
+        // Device toggles pehle — "torch on karo" ko app-launcher parse na kar de.
         parseDevice(normalized)?.let { return it }
 
         // "photo lo", "30 second ka video banao", "recording chalu karo"
@@ -402,6 +416,12 @@ object CommandParser {
         // Info se pehle, warna "meri location batao" me "batao" dekh ke wo
         // sawaal wali branch me chala jata.
         parseLocation(normalized)?.let { return it }
+
+        // "aaj mausam kaisa hai", "kal baarish hogi kya"
+        //
+        // Info se pehle — warna "mausam kitna hai" me "kitna" dekh ke wo
+        // battery/storage wali branch me ghusne ki koshish karta.
+        parseWeather(normalized)?.let { return it }
 
         // "battery kitni hai", "time kya hua", "storage kitna bacha"
         //
@@ -422,7 +442,7 @@ object CommandParser {
         // "5 minute ka timer", "subah 7 baje alarm"
         parseTimerOrAlarm(normalized)?.let { return it }
 
-        // "whatsapp pe rehan ko call karo" \u2014 aam call se pehle.
+        // "whatsapp pe rehan ko call karo" — aam call se pehle.
         parseWhatsAppCall(normalized)?.let { return it }
 
         // "rehan ko call lagao"
@@ -499,6 +519,27 @@ object CommandParser {
     private fun parseLocation(text: String): EvCommand? =
         if (locationWords.any { containsWord(text, it) }) EvCommand.WhereAmI else null
 
+    // --------------------------------------------------------------- mausam
+
+    /**
+     * "aaj mausam kaisa hai", "kal baarish hogi kya", "parso ka mausam".
+     *
+     * Open verb saath ho to chhod dete hain — "mausam app kholo" me user app
+     * kholna chahta hai, mausam ka jawab nahi.
+     */
+    private fun parseWeather(text: String): EvCommand? {
+        if (weatherWords.none { containsWord(text, it) }) return null
+        if (matchPhrase(text, openVerbs) != null) return null
+
+        val offset = when {
+            containsWord(text, "parso") -> 2
+            containsWord(text, "kal") -> 1
+            else -> 0
+        }
+
+        return EvCommand.Weather(offset)
+    }
+
     // ----------------------------------------------------------------- info
 
     /**
@@ -552,7 +593,7 @@ object CommandParser {
     /**
      * "photo lo" / "selfie lo" / "30 second ka video banao"
      *
-     * Video ka time bola ho to wahi, warna 15 second \u2014 itna kaafi hota hai aur
+     * Video ka time bola ho to wahi, warna 15 second — itna kaafi hota hai aur
      * galti se ghanto ki recording nahi chalti.
      */
     private fun parseCamera(text: String): EvCommand? {
@@ -690,7 +731,7 @@ object CommandParser {
     /**
      * "5 minute ka timer lagao", "2 minut ka time lagao", "subah 7 baje alarm".
      *
-     * "time" bhi maanta hai, par sirf tab jab saath me duration ho \u2014 warna
+     * "time" bhi maanta hai, par sirf tab jab saath me duration ho — warna
      * "time kya hua hai" bhi timer ban jata.
      */
     private fun parseTimerOrAlarm(text: String): EvCommand? {
@@ -710,7 +751,7 @@ object CommandParser {
     // ----------------------------------------------------------------- call
 
     /**
-     * "whatsapp pe rehan ko call karo" \u2014 normal call se alag.
+     * "whatsapp pe rehan ko call karo" — normal call se alag.
      *
      * WhatsApp ka naam liya ho to SIM se call lagana galat hoga; user ka matlab
      * internet call hota hai.
@@ -738,7 +779,7 @@ object CommandParser {
         val verb = matchPhrase(text, callVerbs) ?: return null
 
         // "call" aur "dial" akele bahut aam shabd hain: "call of duty kholo",
-        // "dial pad kholo" \u2014 inhe call samajh ke dialer khol dena galat hai.
+        // "dial pad kholo" — inhe call samajh ke dialer khol dena galat hai.
         val explicitPhrase = verb.contains(" ")
         val hasKo = koRegex.containsMatchIn(text)
         if (!explicitPhrase && !hasKo) return null
@@ -815,7 +856,7 @@ object CommandParser {
         val wantsMin = has(minWords)
         val hasModifier = wantsOn || wantsOff || wantsUp || wantsDown || wantsMax || wantsMin
 
-        // "volume 100% karo" \u2014 percent mila to seedha wahi level set hota hai.
+        // "volume 100% karo" — percent mila to seedha wahi level set hota hai.
         val percent = percentRegex.find(text)
             ?.groupValues?.get(1)
             ?.toIntOrNull()
@@ -867,7 +908,7 @@ object CommandParser {
 
             has(dataWords) && hasModifier -> DeviceAction.MOBILE_DATA
 
-            // "settings kholo" \u2014 sirf tab jab koi app ka naam saath me na ho.
+            // "settings kholo" — sirf tab jab koi app ka naam saath me na ho.
             has(settingsWords) && matchPhrase(text, openVerbs) != null -> DeviceAction.SETTINGS
 
             else -> null
