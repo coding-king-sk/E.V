@@ -20,8 +20,8 @@ import com.ev.android.feature.hud.EvCardSubtitle
 import com.ev.android.feature.hud.EvCardTitle
 import com.ev.android.feature.hud.EvDialogButton
 import com.ev.android.feature.hud.EvGap
+import com.ev.android.feature.hud.EvPanel
 import com.ev.android.feature.hud.EvSectionHeader
-import com.ev.android.feature.hud.EvSheet
 import com.ev.android.feature.hud.EvToggleCard
 import com.ev.android.feature.hud.evFieldColors
 import com.ev.android.feature.permissions.PermissionsSection
@@ -35,14 +35,22 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * App ki saari settings ek jagah, poori screen pe cards ke roop me.
+ * App ki saari settings \u2014 ab home screen ke **andar** wale panel me.
+ *
+ * Pehle ye poori screen ka dialog thi, jisse app do alag screen jaisi lagti
+ * thi. Reference design me header aur tabs upar dikhte rehte hain aur command
+ * box neeche \u2014 isliye ab ye [EvPanel] me hai.
  *
  * Groq API key ka field yahan jaan-boojh ke nahi hai \u2014 wo home screen ke
  * API KEY button me hai. Ek hi cheez do jagah rakhne se ye confusion hota tha
  * ki kaunsi wali asli hai.
  */
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
+fun SettingsPanel(
+    onClose: () -> Unit,
+    onSaved: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -55,7 +63,6 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
     var aliases by remember { mutableStateOf(EvSettings.aliasesRaw(context)) }
 
     var reminders by remember { mutableStateOf(Reminders.upcoming(context)) }
-    val exactAlarms = remember { Reminders.canBeExact(context) }
     val notificationsOff = remember { Reminders.notificationsBlocked(context) }
     val reminderClock = remember { SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()) }
 
@@ -68,9 +75,10 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
 
     val libraryOk = remember { SherpaWakeWord.isLibraryAvailable() }
 
-    EvSheet(
+    EvPanel(
         title = "Settings",
-        onDismiss = onDismiss,
+        onClose = onClose,
+        modifier = modifier,
         onSave = {
             EvSettings.setAiEnabled(context, aiOn)
             EvSettings.setSendPersonalToAi(context, personalOn)
@@ -84,7 +92,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
             onSaved(
                 if (aiOn) "AI fallback chalu hai" else "AI fallback band hai"
             )
-            onDismiss()
+            onClose()
         },
     ) {
 
@@ -116,20 +124,6 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
 
         EvSectionHeader("Reminders")
 
-        if (!exactAlarms) {
-            EvCard {
-                Text(
-                    text = "\u26A0 \"Alarms & reminders\" ki permission nahi hai. Reminder " +
-                        "set to ho jayega, par theek waqt pe nahi \u2014 phone ke so jane " +
-                        "par kai minute late baj sakta hai. Upar Permissions me se ise " +
-                        "allow kar do.",
-                    color = EvRed,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                )
-            }
-        }
-
         if (notificationsOff) {
             EvCard {
                 Text(
@@ -147,7 +141,7 @@ fun SettingsDialog(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
                 EvCardTitle("Abhi koi reminder nahi")
                 EvCardSubtitle(
                     "Bol ke lagao: \"kal subah 8 baje yaad dilana ki dawai leni hai\" " +
-                        "ya \"10 minute baad yaad dilana paani peena hai\". Yahan list " +
+                        "ya \"2 minute baad yaad dilana paani peena hai\". Yahan list " +
                         "me dikhega ki kab bajega \u2014 isse pata chal jata hai ki " +
                         "reminder set hua ya nahi."
                 )

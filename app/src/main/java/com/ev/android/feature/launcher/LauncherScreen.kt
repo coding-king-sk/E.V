@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -80,11 +81,14 @@ import com.ev.android.feature.hud.HudHeader
 import com.ev.android.feature.hud.HudSectionLabel
 import com.ev.android.feature.hud.HudStatusRow
 import com.ev.android.feature.hud.HudTabs
+import com.ev.android.feature.hud.OrbEditorPanel
+import com.ev.android.feature.hud.OrbStyle
+import com.ev.android.feature.hud.OrbStyleStore
 import com.ev.android.feature.notes.Note
 import com.ev.android.feature.notes.Notes
 import com.ev.android.feature.settings.ApiKeyDialog
 import com.ev.android.feature.settings.EvSettings
-import com.ev.android.feature.settings.SettingsDialog
+import com.ev.android.feature.settings.SettingsPanel
 import com.ev.android.feature.tts.Speaker
 import com.ev.android.feature.tts.VoiceSetup
 import com.ev.android.feature.voice.EvListeningService
@@ -110,16 +114,12 @@ private const val TAB_HISTORY = "HISTORY"
 private val tabs = listOf(TAB_COMMAND, TAB_NOTES, TAB_GALLERY, TAB_HISTORY)
 
 /**
- * E.V ki main screen — HUD look.
+ * E.V ki main screen \u2014 HUD look.
  *
  * Beech me sirf orb rehta hai, jo batata hai E.V so raha hai, sun raha hai ya
- * soch raha hai. Apps kholna aur torch/volume jaise kaam ab tabs me nahi hain —
- * wo bolke ya likh ke hote hain ("instagram kholo", "torch on karo"), isliye
- * screen khaali aur shaant rehti hai.
- *
- * Jawab dene ke liye pehle Material ka snackbar tha, par wo safed patti dark
- * HUD pe bahut bhadki lagti thi. Ab har jawab orb ke neeche wali status line me
- * aata hai — wahi jagah jahan user pehle se dekh raha hota hai.
+ * soch raha hai. Settings aur orb editor bhi isi beech wale hisse me khulte
+ * hain \u2014 alag screen nahi, taaki header, tabs aur command box hamesha ek hi
+ * jagah rahein.
  */
 @Composable
 fun LauncherScreen(modifier: Modifier = Modifier) {
@@ -136,6 +136,8 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     var apiKeySet by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var showOrbEditor by remember { mutableStateOf(false) }
+    var orbStyle by remember { mutableStateOf(OrbStyleStore.DEFAULT) }
     var showApiKey by remember { mutableStateOf(false) }
     var handsFree by remember { mutableStateOf(EvListeningService.isRunning) }
     var handsFreePaused by remember { mutableStateOf(false) }
@@ -148,10 +150,11 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         Notes.load(context)
         apiKeySet = EvSettings.hasApiKey(context)
         handsFree = EvListeningService.isRunning
+        orbStyle = OrbStyleStore.load(context)
         installedApps = InstalledAppsRepository.load(context)
     }
 
-    // Gallery har baar tab khulne pe refresh — beech me nayi photo li ho to
+    // Gallery har baar tab khulne pe refresh \u2014 beech me nayi photo li ho to
     // wapas aate hi dikh jaye.
     LaunchedEffect(tab) {
         if (tab != TAB_GALLERY) return@LaunchedEffect
@@ -169,7 +172,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
      * TTS engine app ke saath zinda rehta hai.
      *
      * Agar acchi Hindi awaz phone me hai hi nahi, to bina kuch poochhe seedha
-     * Google ki voice-data install screen khul jaati hai — user ko bas
+     * Google ki voice-data install screen khul jaati hai \u2014 user ko bas
      * "Install" dabana hai.
      */
     DisposableEffect(Unit) {
@@ -225,7 +228,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 Manifest.permission.RECORD_AUDIO,
             )
 
-            // Ek hi vaakya me kai kaam — sabki permissions ek saath maang lo,
+            // Ek hi vaakya me kai kaam \u2014 sabki permissions ek saath maang lo,
             // warna beech me ruk ke user ko do-teen dialog dekhne padte hain.
             is EvCommand.Multi -> command.commands.flatMap { inner ->
                 when (inner) {
@@ -263,7 +266,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     ) { _ ->
         val queued = pendingCommand
         pendingCommand = null
-        // Permission mile ya na mile, command chala dete hain — executor khud
+        // Permission mile ya na mile, command chala dete hain \u2014 executor khud
         // fallback karta hai (SMS draft, dialer, ya saaf error message).
         if (queued != null) dispatch(queued)
     }
@@ -320,7 +323,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
     /**
      * App khulte hi hands-free apne aap on.
      *
-     * Toggle sirf isliye bacha hai ki kabhi khud band karna ho — roz roz on
+     * Toggle sirf isliye bacha hai ki kabhi khud band karna ho \u2014 roz roz on
      * karne ki zaroorat nahi.
      */
     LaunchedEffect(Unit) {
@@ -374,7 +377,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                 return@launch
             }
 
-            // Command nahi bana — shayad ye sawaal hai. Groq se jawab lo.
+            // Command nahi bana \u2014 shayad ye sawaal hai. Groq se jawab lo.
             val reply = com.ev.android.feature.ai.Conversation.answer(context, text)
             busy = false
 
@@ -413,17 +416,17 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
      * Mic button.
      *
      * Whisper tabhi chalta hai jab user ne Settings me khud on kiya ho aur key
-     * ho. Baaki har haal me Google recognizer — wo offline bhi kaam kar jata
+     * ho. Baaki har haal me Google recognizer \u2014 wo offline bhi kaam kar jata
      * hai, isliye default wahi hai.
-     *
-     * Dono soorat me hands-free service pehle roki jaati hai. Mic ek waqt me
-     * ek hi app ko milta hai, aur service ka recognizer pakde baitha ho to
-     * button dabane pe kuch hota hi nahi.
      */
     fun startListening() {
         val wasHandsFree = EvListeningService.isRunning
         if (wasHandsFree) EvListeningService.stop(context)
         handsFreePaused = wasHandsFree
+
+        // Bolte waqt orb dikhna chahiye \u2014 panel khula ho to band kar dete hain.
+        showSettings = false
+        showOrbEditor = false
 
         if (!EvSettings.whisperStt(context)) {
             listening = true
@@ -464,13 +467,24 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         ) {
             HudHeader(
                 networkOnline = true,
-                onSettings = { showSettings = true },
+                onSettings = {
+                    showOrbEditor = false
+                    showSettings = !showSettings
+                },
                 modifier = Modifier.padding(top = 10.dp),
             )
 
             Spacer(modifier = Modifier.size(16.dp))
 
-            HudTabs(tabs = tabs, selected = tab, onSelect = { tab = it })
+            HudTabs(
+                tabs = tabs,
+                selected = tab,
+                onSelect = {
+                    tab = it
+                    showSettings = false
+                    showOrbEditor = false
+                },
+            )
 
             Spacer(modifier = Modifier.size(12.dp))
 
@@ -497,14 +511,36 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                when (tab) {
-                    TAB_COMMAND -> CommandPane(
+                when {
+                    showSettings -> SettingsPanel(
+                        onClose = {
+                            showSettings = false
+                            apiKeySet = EvSettings.hasApiKey(context)
+                        },
+                        onSaved = {
+                            apiKeySet = EvSettings.hasApiKey(context)
+                            notify(it)
+                        },
+                    )
+
+                    showOrbEditor -> OrbEditorPanel(
+                        style = orbStyle,
+                        onChange = { updated ->
+                            orbStyle = updated
+                            OrbStyleStore.save(context, updated)
+                        },
+                        onClose = { showOrbEditor = false },
+                    )
+
+                    tab == TAB_COMMAND -> CommandPane(
                         listening = listening,
                         busy = busy,
                         status = status,
+                        orbStyle = orbStyle,
+                        onOrbTap = { showOrbEditor = true },
                     )
 
-                    TAB_NOTES -> NotesPane(
+                    tab == TAB_NOTES -> NotesPane(
                         notes = Notes.items,
                         onAdd = { text ->
                             Notes.add(context, text)
@@ -513,7 +549,7 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
                         onDelete = { note -> Notes.remove(context, note) },
                     )
 
-                    TAB_GALLERY -> GalleryPane(
+                    tab == TAB_GALLERY -> GalleryPane(
                         items = gallery,
                         loading = galleryLoading,
                         onOpen = { item -> EvGallery.open(context, item) },
@@ -588,19 +624,6 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    if (showSettings) {
-        SettingsDialog(
-            onDismiss = {
-                showSettings = false
-                apiKeySet = EvSettings.hasApiKey(context)
-            },
-            onSaved = {
-                apiKeySet = EvSettings.hasApiKey(context)
-                notify(it)
-            },
-        )
-    }
-
     if (showApiKey) {
         ApiKeyDialog(
             onDismiss = {
@@ -616,18 +639,19 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
 }
 
 /**
- * Beech wala shaant sa screen — sirf orb aur ek line status.
+ * Beech wala shaant sa screen \u2014 sirf orb aur ek line status.
  *
- * Accessibility wala "AUTO-SEND / TYPING OFF" button yahan se hata diya hai;
- * wo ab Settings > Permissions me apne baaki bhaiyon ke saath hai. Home screen
- * pe use rakhne ka matlab tha ki jab tak permission na do, ek chetavni hamesha
- * saamne padi rehti thi.
+ * Orb pe tap karne se uska design editor khulta hai (rang, size, dots, lehar
+ * waghairah) \u2014 isi liye neeche ek chhota sa ishara likha hai, warna kisi ko
+ * pata hi nahi chalta ki orb tap bhi hota hai.
  */
 @Composable
 private fun CommandPane(
     listening: Boolean,
     busy: Boolean,
     status: String,
+    orbStyle: OrbStyle,
+    onOrbTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -635,12 +659,21 @@ private fun CommandPane(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        EvOrb(
-            listening = listening,
-            busy = busy,
-            dimmed = false,
-            modifier = Modifier.size(250.dp),
-        )
+        Box(
+            modifier = Modifier
+                .size(orbStyle.sizeDp.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onOrbTap),
+            contentAlignment = Alignment.Center,
+        ) {
+            EvOrb(
+                listening = listening,
+                busy = busy,
+                dimmed = false,
+                style = orbStyle,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         Text(
             text = status,
@@ -651,7 +684,16 @@ private fun CommandPane(
             textAlign = TextAlign.Center,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 26.dp, start = 12.dp, end = 12.dp),
+            modifier = Modifier.padding(top = 22.dp, start = 12.dp, end = 12.dp),
+        )
+
+        Text(
+            text = "ORB PE TAP KARO \u2192 DESIGN BADLO",
+            color = EvTextMuted,
+            fontSize = 10.sp,
+            letterSpacing = 1.5.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 12.dp),
         )
     }
 }
@@ -659,7 +701,7 @@ private fun CommandPane(
 /**
  * Chhote notes.
  *
- * Bolke bhi likhwa sakte ho — mic dabao, bolo, phir text yahan paste karke
+ * Bolke bhi likhwa sakte ho \u2014 mic dabao, bolo, phir text yahan paste karke
  * save kar do. Sab kuch phone me hi rehta hai.
  */
 @Composable
