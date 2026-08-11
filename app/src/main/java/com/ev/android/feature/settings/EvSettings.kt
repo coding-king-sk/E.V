@@ -22,6 +22,8 @@ object EvSettings {
     private const val KEY_ALIASES = "contact_aliases"
     private const val KEY_AUTO_SEND = "whatsapp_auto_send"
     private const val KEY_AUTO_TYPE = "auto_type"
+    private const val KEY_BUBBLE = "floating_bubble"
+    private const val KEY_WAKE_NAME = "wake_name"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -80,6 +82,41 @@ object EvSettings {
     fun setAutoType(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_AUTO_TYPE, value).apply()
     }
+
+    // ------------------------------------------------------- floating bubble
+
+    /**
+     * Har app ke upar tairta hua orb.
+     *
+     * Default **off** \u2014 iske liye "Display over other apps" wali permission
+     * chahiye hoti hai, jo runtime dialog se nahi milti. User khud on kare
+     * tabhi hum wo screen kholte hain.
+     */
+    fun bubbleEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_BUBBLE, false)
+
+    fun setBubbleEnabled(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_BUBBLE, value).apply()
+    }
+
+    // ------------------------------------------------------- assistant ka naam
+
+    /**
+     * Jagane wala naam \u2014 "E.V", "Jarvis", jo bhi user rakhe.
+     *
+     * Ye sirf sunne ke liye hai: hands-free mode isi naam ko dhoondhta hai.
+     * Khaali chhoda to wapas "E.V" chalta hai.
+     */
+    fun wakeName(context: Context): String {
+        val saved = prefs(context).getString(KEY_WAKE_NAME, "").orEmpty().trim()
+        return if (saved.isEmpty()) DEFAULT_WAKE_NAME else saved
+    }
+
+    fun setWakeName(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_WAKE_NAME, value.trim()).apply()
+    }
+
+    const val DEFAULT_WAKE_NAME = "E.V"
 
     // ------------------------------------------------------- contact aliases
 

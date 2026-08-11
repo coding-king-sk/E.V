@@ -20,6 +20,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+        Floating bubble.
+        SYSTEM_ALERT_WINDOW runtime dialog se nahi milti \u2014 user ko Settings ki
+        alag screen pe jaana padta hai, isliye app usi screen pe bhej deti hai.
+        Bubble wali service ka koi mic/camera kaam nahi hai, isliye uska
+        foreground type "specialUse" hai.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!--
         "Meri location batao".
         Sirf FINE maangna zaroori nahi \u2014 COARSE bhi ho to mohalle ka naam bata
         dete hain, aur ye kam khatarnak permission hai.
@@ -175,6 +185,16 @@
             android:name=".feature.voice.EvListeningService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Har app ke upar tairta hua orb. -->
+        <service
+            android:name=".feature.bubble.BubbleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating assistant bubble shown over other apps" />
+        </service>
 
         <service
             android:name=".feature.accessibility.EvAccessibilityService"
