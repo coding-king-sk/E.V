@@ -28,6 +28,8 @@ import androidx.core.content.ContextCompat
  * pehle Google app apni permission se kaam chala leta tha. Hands-free ke liye
  * wo permission waise bhi maangi jaati hai, isliye practically farak nahi.
  *
+ * Awaaz ka level `MicLevel` me jata hai, jise orb padh kar lehrata hai.
+ *
  * Returns a lambda — call it to start listening.
  */
 @Composable
@@ -69,13 +71,16 @@ fun rememberVoiceCommand(
         holder.current = recognizer
 
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) = Unit
+            override fun onReadyForSpeech(params: Bundle?) = MicLevel.reset()
             override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
             override fun onBufferReceived(buffer: ByteArray?) = Unit
-            override fun onEndOfSpeech() = Unit
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
             override fun onPartialResults(partialResults: Bundle?) = Unit
+
+            /** Yahi wo number hai jisse orb lehrata hai. */
+            override fun onRmsChanged(rmsdB: Float) = MicLevel.update(rmsdB)
+
+            override fun onEndOfSpeech() = MicLevel.reset()
 
             override fun onResults(results: Bundle?) {
                 holder.release()
@@ -107,6 +112,7 @@ private class RecognizerHolder {
     var current: SpeechRecognizer? = null
 
     fun release() {
+        MicLevel.reset()
         val recognizer = current ?: return
         current = null
         runCatching {

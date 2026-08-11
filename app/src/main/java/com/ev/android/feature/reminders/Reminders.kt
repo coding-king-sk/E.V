@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.core.app.NotificationManagerCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -40,13 +41,17 @@ object Reminders {
      * @return false tabhi jab system ne alarm set hi na karne diya
      */
     fun schedule(context: Context, at: Long, text: String): Boolean {
+        // Channel pehle. Pehle ye alarm ke BAAD banta tha — aur agar beech me
+        // process mar jata to reminder bajne ke waqt channel hota hi nahi,
+        // jiska matlab hai notification chup-chaap gayab.
+        ensureChannel(context)
+
         val pending = all(context).filter { it.at > System.currentTimeMillis() }
         val reminder = Reminder(id = nextId(pending), at = at, text = text)
 
         if (!setAlarm(context, reminder)) return false
 
         save(context, pending + reminder)
-        ensureChannel(context)
         return true
     }
 
@@ -66,6 +71,28 @@ object Reminders {
         }.getOrDefault(emptyList())
     }
 
+    /** Sirf wo reminders jo abhi bajne baaki hain — Settings me yahi dikhte hain. */
+    fun upcoming(context: Context): List<Reminder> {
+        val now = System.currentTimeMillis()
+        return all(context).filter { it.at > now }.sortedBy { it.at }
+    }
+
+    /**
+     * Android 12+ pe "Alarms & reminders" ki permission na ho to reminder
+     * theek waqt pe nahi, thoda late bajta hai. UI ise dikha sakti hai.
+     */
+    fun canBeExact(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val manager = context.getSystemService(AlarmManager::class.java) ?: return false
+        return runCatching { manager.canScheduleExactAlarms() }.getOrDefault(false)
+    }
+
+    /** Notification band hai to reminder dikhega nahi — sirf awaaz aayegi. */
+    fun notificationsBlocked(context: Context): Boolean =
+        runCatching {
+            !NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }.getOrDefault(false)
+
     fun remove(context: Context, id: Int) {
         save(context, all(context).filter { it.id != id })
     }
@@ -84,6 +111,8 @@ object Reminders {
 
     /** Reboot ke baad. Jo waqt nikal chuka hai use chup-chaap gira dete hain. */
     fun rescheduleAll(context: Context) {
+        ensureChannel(context)
+
         val now = System.currentTimeMillis()
         val alive = all(context).filter { it.at > now }
         alive.forEach { setAlarm(context, it) }
@@ -99,10 +128,14 @@ object Reminders {
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             description = "Jo aapne yaad dilane ko kaha tha"
+            enableVibration(true)
+            setShowBadge(true)
         }
 
-        context.getSystemService(NotificationManager::class.java)
-            ?.createNotificationChannel(channel)
+        runCatching {
+            context.getSystemService(NotificationManager::class.java)
+                ?.createNotificationChannel(channel)
+        }
     }
 
     /** "Kal subah 8:00 baje yaad dila dunga: dawai leni hai" */
@@ -143,10 +176,7 @@ object Reminders {
         // inexact set kar dete hain — thoda late baj sakta hai, par kaam karta
         // hai aur crash nahi hota.
         return runCatching {
-            val canBeExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                manager.canScheduleExactAlarms()
-
-            if (canBeExact) {
+            if (canBeExact(context)) {
                 manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.at, pending)
             } else {
                 manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.at, pending)
