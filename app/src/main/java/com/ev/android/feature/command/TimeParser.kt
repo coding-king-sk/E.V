@@ -7,11 +7,12 @@ import java.util.TimeZone
  * Hinglish me time nikalne wale chhote helpers.
  *
  * Log "5 minute" bhi bolte hain aur "paanch minute" bhi, isliye digits aur
- * Hindi ginti dono handle karte hain.
+ * Hindi ginti dono handle karte hain. Spelling ki bhi koi ginti nahi \u2014
+ * Google ka recognizer "minute" ko "minut" ya "mint" bhi likh deta hai.
  */
 internal object TimeParser {
 
-    /** Timer ki upper limit — 24 ghante se zyada ka timer galti hi hoti hai. */
+    /** Timer ki upper limit \u2014 24 ghante se zyada ka timer galti hi hoti hai. */
     private const val MAX_DURATION_SECONDS = 24 * 3600
 
     private val numberWords = mapOf(
@@ -22,9 +23,15 @@ internal object TimeParser {
         "chalis" to 40, "paintalis" to 45, "pachas" to 50,
     )
 
-    private val secondUnits = listOf("second", "seconds", "sec", "secs", "sekand")
-    private val minuteUnits = listOf("minute", "minutes", "min", "mins", "minit")
-    private val hourUnits = listOf("hour", "hours", "ghanta", "ghante", "ghanto")
+    private val secondUnits = listOf(
+        "second", "seconds", "sec", "secs", "sekand", "sekend", "secound",
+    )
+    private val minuteUnits = listOf(
+        "minute", "minutes", "min", "mins", "minit", "minut", "minuts", "mint", "minat",
+    )
+    private val hourUnits = listOf(
+        "hour", "hours", "hr", "hrs", "ghanta", "ghante", "ghanto",
+    )
 
     /** "5 minute", "paanch minute", "30 second" -> seconds. */
     fun durationSeconds(text: String): Int? {
@@ -96,7 +103,7 @@ internal object TimeParser {
      *  - "kal subah 8 baje yaad dilana"      -> agle din 08:00
      *
      * Agar sirf time bola ho ("shaam 7 baje") aur wo waqt aaj nikal chuka ho,
-     * to agle din maan lete hain — warna reminder turant bajta, jo bekaar hai.
+     * to agle din maan lete hain \u2014 warna reminder turant bajta, jo bekaar hai.
      *
      * @param now testing ke liye inject kiya ja sakta hai
      */
