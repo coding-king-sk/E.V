@@ -1,6 +1,7 @@
 package com.ev.android.feature.command
 
 import com.ev.android.feature.device.DeviceAction
+import com.ev.android.feature.info.InfoKind
 import com.ev.android.feature.media.MediaAction
 
 /**
@@ -32,6 +33,9 @@ sealed interface EvCommand {
     /** "youtube pe cricket search karo" */
     data class SearchInApp(val query: String, val target: AppTarget) : EvCommand
 
+    /** "google pe sachin tendulkar search karo" */
+    data class WebSearch(val query: String) : EvCommand
+
     /** "rehan ko bolo ki main aa raha hoon" */
     data class SendWhatsApp(val contactName: String?, val message: String) : EvCommand
 
@@ -40,6 +44,9 @@ sealed interface EvCommand {
 
     /** "rehan ko call lagao" */
     data class CallContact(val contactName: String) : EvCommand
+
+    /** "whatsapp pe rehan ko call karo" */
+    data class WhatsAppCall(val contactName: String, val video: Boolean) : EvCommand
 
     /** "next gaana", "gaana roko" */
     data class Media(val action: MediaAction) : EvCommand
@@ -55,6 +62,15 @@ sealed interface EvCommand {
 
     /** "kal subah 8 baje yaad dilana ki dawai leni hai" */
     data class Reminder(val at: Long, val text: String) : EvCommand
+
+    /** "note karo khana khana hai" */
+    data class Note(val text: String) : EvCommand
+
+    /** "battery kitni hai", "time kya hua", "storage kitna bacha" */
+    data class Info(val kind: InfoKind) : EvCommand
+
+    /** "1500 ka 18% kitna hota hai" */
+    data class Calculate(val expression: String) : EvCommand
 
     /**
      * "torch on karo", "volume 60% karo"
