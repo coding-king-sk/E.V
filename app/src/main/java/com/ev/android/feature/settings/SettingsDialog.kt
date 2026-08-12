@@ -34,13 +34,13 @@ import kotlinx.coroutines.launch
 /**
  * App ki saari settings \u2014 poore page me.
  *
- * Groq API key ka field yahan jaan-boojh ke nahi hai \u2014 wo home screen ke
- * API KEY button me hai. Ek hi cheez do jagah rakhne se ye confusion hota tha
- * ki kaunsi wali asli hai.
+ * SAVE ka button nahi hai. Har cheez badalte hi save ho jati hai \u2014 SAVE
+ * dabana bhool jaane par setting chup-chaap gayab ho jaati thi, aur usme
+ * user ki koi galti nahi thi.
  *
- * Reminders aur naam ki galtiyan (aliases) bhi ab yahan nahi hain. Wo roz
- * kaam aane wali cheezen hain, aur settings saal me ek baar khulti hai \u2014
- * isliye dono home screen ke apne tab me chale gaye hain.
+ * Groq API key ka field yahan jaan-boojh ke nahi hai \u2014 wo home screen ke
+ * API KEY button me hai. Reminders aur naam ki galtiyan (aliases) bhi ab
+ * home screen ke apne tab me hain.
  */
 @Composable
 fun SettingsPanel(
@@ -76,31 +76,6 @@ fun SettingsPanel(
         title = "Settings",
         onClose = onClose,
         modifier = modifier,
-        onSave = {
-            EvSettings.setAiEnabled(context, aiOn)
-            EvSettings.setSendPersonalToAi(context, personalOn)
-            EvSettings.setWhisperStt(context, whisperOn)
-            EvSettings.setWhatsappAutoSend(context, autoSend)
-            EvSettings.setAutoType(context, autoType)
-            EvSettings.setWakeName(context, wakeName)
-            EvSettings.setOfflineWakeWord(context, offlineWake)
-            EvSettings.setWakeWordModelUrl(context, modelUrl)
-            EvSettings.setWakeWordKeywords(context, keywords)
-
-            // Bubble ko yahin chalu/band kar dete hain \u2014 save daba ke bahar
-            // jaane par turant farq dikhna chahiye.
-            EvSettings.setBubbleEnabled(context, bubbleOn)
-            if (bubbleOn && Bubble.canShow(context)) {
-                Bubble.start(context)
-            } else {
-                Bubble.stop(context)
-            }
-
-            onSaved(
-                if (aiOn) "AI fallback chalu hai" else "AI fallback band hai"
-            )
-            onClose()
-        },
     ) {
 
         // Onboarding hat gaya hai, isliye permissions ka poora hisaab ab yahan
@@ -140,11 +115,22 @@ fun SettingsPanel(
         EvToggleCard(
             title = "Bubble dikhao",
             subtitle = "E.V ka orb har app ke upar tairta rahega. Ek tap = neeche " +
-                "chhota bar, double tap = seedha mic. Khinch ke chhodoge to " +
-                "kinare pe chipak jayega, kuch der haath na lage to halka pad " +
-                "jayega, aur neeche X pe chhodoge ya lamba dabaoge to band.",
+                "bar aur mic turant chalu, double tap = poori app. Khinch ke " +
+                "chhodoge to kinare pe chipak jayega, kuch der haath na lage to " +
+                "halka pad jayega, aur neeche X pe chhodoge ya lamba dabaoge to " +
+                "band.",
             checked = bubbleOn,
-            onChange = { bubbleOn = it },
+            onChange = { on ->
+                bubbleOn = on
+                EvSettings.setBubbleEnabled(context, on)
+                if (on && Bubble.canShow(context)) {
+                    Bubble.start(context)
+                    onSaved("Bubble chalu")
+                } else {
+                    Bubble.stop(context)
+                    if (on) onSaved("Pehle overlay permission do") else onSaved("Bubble band")
+                }
+            },
         )
 
         // ---------------------------------------------------- E.V ka naam
@@ -161,7 +147,10 @@ fun SettingsPanel(
             )
             OutlinedTextField(
                 value = wakeName,
-                onValueChange = { wakeName = it },
+                onValueChange = {
+                    wakeName = it
+                    EvSettings.setWakeName(context, it)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
@@ -179,7 +168,10 @@ fun SettingsPanel(
                 "message likha hua milega, send aap dabaoge. Dono me Accessibility " +
                 "on hona zaroori hai.",
             checked = autoSend,
-            onChange = { autoSend = it },
+            onChange = {
+                autoSend = it
+                EvSettings.setWhatsappAutoSend(context, it)
+            },
         )
 
         EvToggleCard(
@@ -187,7 +179,10 @@ fun SettingsPanel(
             subtitle = "\"Instagram pe type karo hello\" jaise command. Off karoge to " +
                 "E.V kisi app ke text box me kuch nahi likhega.",
             checked = autoType,
-            onChange = { autoType = it },
+            onChange = {
+                autoType = it
+                EvSettings.setAutoType(context, it)
+            },
         )
 
         EvSectionHeader("AI")
@@ -197,7 +192,10 @@ fun SettingsPanel(
             subtitle = "Jo command E.V khud na samajh paye wahi Groq ko jata hai. " +
                 "Key home screen ke API KEY button me daalni hai.",
             checked = aiOn,
-            onChange = { aiOn = it },
+            onChange = {
+                aiOn = it
+                EvSettings.setAiEnabled(context, it)
+            },
         )
 
         EvToggleCard(
@@ -206,7 +204,10 @@ fun SettingsPanel(
                 "message ka text hota hai, aur free tier pe providers prompts ko " +
                 "training me use kar sakte hain.",
             checked = personalOn,
-            onChange = { personalOn = it },
+            onChange = {
+                personalOn = it
+                EvSettings.setSendPersonalToAi(context, it)
+            },
         )
 
         EvSectionHeader("Sunna (speech to text)")
@@ -217,7 +218,10 @@ fun SettingsPanel(
                 "Groq ke server pe jaati hai aur internet chahiye. Sirf mic button " +
                 "pe lagta hai, wake word pe nahi.",
             checked = whisperOn,
-            onChange = { whisperOn = it },
+            onChange = {
+                whisperOn = it
+                EvSettings.setWhisperStt(context, it)
+            },
         )
 
         EvSectionHeader("Offline wake word")
@@ -240,7 +244,10 @@ fun SettingsPanel(
             subtitle = "Wake word phone ke andar hi pakda jayega, bina internet ke " +
                 "aur bina awaaz kahin bheje. Iske liye neeche wala model chahiye.",
             checked = offlineWake,
-            onChange = { offlineWake = it },
+            onChange = {
+                offlineWake = it
+                EvSettings.setOfflineWakeWord(context, it)
+            },
         )
 
         EvCard(highlighted = modelReady) {
@@ -307,7 +314,10 @@ fun SettingsPanel(
             )
             OutlinedTextField(
                 value = keywords,
-                onValueChange = { keywords = it },
+                onValueChange = {
+                    keywords = it
+                    EvSettings.setWakeWordKeywords(context, it)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
@@ -318,7 +328,10 @@ fun SettingsPanel(
 
             OutlinedTextField(
                 value = modelUrl,
-                onValueChange = { modelUrl = it },
+                onValueChange = {
+                    modelUrl = it
+                    EvSettings.setWakeWordModelUrl(context, it)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),

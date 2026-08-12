@@ -1,5 +1,6 @@
 package com.ev.android.feature.bubble
 
+import android.Manifest
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,7 +9,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -19,15 +22,24 @@ import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.text.InputType
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.ev.android.MainActivity
@@ -35,7 +47,6 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
  * Bubble ko bahar se chalane wale chhote helpers.
@@ -85,23 +96,24 @@ object Bubble {
  * service ko chup-chaap maar deta hai. Notification ki importance sabse kam
  * rakhi hai taaki wo chup rahe.
  *
- * Single tap  -> neeche chhota sa action bar khulta hai (peeche wali app
- *                dikhti rehti hai)
- * Double tap  -> seedha mic - bolo aur kaam ho jaye
- * Drag        -> chhodte hi kinare pe chipak jata hai, taaki beech ka hissa
- *                khaali rahe
+ * Single tap  -> neeche action bar khulta hai AUR mic turant sunne lagta hai.
+ *                Wake word bolne ki zaroorat nahi - tap hi jagana hai.
+ * Double tap  -> poori app khul jati hai, wo bhi sunte hue
+ * Drag        -> chhodte hi kinare pe chipak jata hai
  * Neeche X pe chhodo -> bubble abhi ke liye band
  * Lamba dabao -> bubble band
- * Kuch der haath na lage -> halka transparent, taaki peeche wali screen dikhe
+ * Kuch der haath na lage -> halka transparent
  */
 class BubbleService : Service() {
 
     private var windowManager: WindowManager? = null
     private var orb: OrbView? = null
-    private var params: WindowManager.LayoutParams? = null
 
     private var trash: View? = null
     private var panel: View? = null
+    private var field: EditText? = null
+
+    private var recognizer: SpeechRecognizer? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val fadeRunnable = Runnable {
@@ -121,6 +133,7 @@ class BubbleService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        stopBarMic()
         hidePanel()
         hideTrash()
         orb?.let { view ->
@@ -168,7 +181,6 @@ class BubbleService : Service() {
             x = saved.getInt(KEY_X, 0)
             y = saved.getInt(KEY_Y, 320)
         }
-        params = layout
 
         val view = OrbView(this)
         orb = view
@@ -403,11 +415,14 @@ class BubbleService : Service() {
     }
 
     /**
-     * Single tap wala chhota bar.
+     * Single tap wala action bar.
      *
-     * Poori app kholne ki zaroorat nahi - jo kaam sabse zyada hote hain wo
-     * neeche ek patli si patti me aa jaate hain, aur peeche wali app dikhti
-     * rehti hai.
+     * Design app ki HUD jaisa hai - kaala card, hari dhaar, aur andar wahi
+     * gol buttons jo home screen pe hain. Poori app kholne ki zaroorat nahi;
+     * peeche wali app dikhti rehti hai.
+     *
+     * Khulte hi mic bhi chalu ho jata hai - tap hi "jagana" hai, wake word
+     * bolne ki zaroorat nahi.
      */
     private fun showPanel() {
         val manager = windowManager ?: return
@@ -415,79 +430,238 @@ class BubbleService : Service() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(28).toFloat()
+                setColor(SURFACE)
+                setStroke(dp(1), OUTLINE)
+            }
         }
 
-        row.addView(roundButton("\uD83D\uDCF7") { launchMain(command = "photo lo") })
+        val input = EditText(this).apply {
+            hint = "E.V SE POOCHHO\u2026"
+            setHintTextColor(TEXT_MUTED)
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_SEND
+            setPadding(dp(18), 0, dp(18), 0)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(22).toFloat()
+                setColor(SURFACE_HIGH)
+                setStroke(dp(1), OUTLINE)
+            }
+            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+            setOnEditorActionListener { _, actionId, _ ->
+                val done = actionId == EditorInfo.IME_ACTION_SEND ||
+                    actionId == EditorInfo.IME_ACTION_DONE ||
+                    actionId == EditorInfo.IME_ACTION_GO
+                if (done) {
+                    val typed = text?.toString().orEmpty().trim()
+                    if (typed.isNotEmpty()) launchMain(command = typed)
+                }
+                done
+            }
+        }
+        field = input
+
+        row.addView(iconButton(IconView.CAMERA) { launchMain(command = "photo lo") })
         row.addView(gap())
-        row.addView(roundButton("\u2191") { launchMain() })
+        row.addView(input)
         row.addView(gap())
-        row.addView(pill())
+        row.addView(iconButton(IconView.MIC) { startBarMic() })
         row.addView(gap())
-        row.addView(roundButton("\uD83C\uDFA4") { launchMain(listen = true) })
-        row.addView(gap())
-        row.addView(roundButton("\u2715") { hidePanel() })
+        row.addView(iconButton(IconView.CLOSE) { hidePanel() })
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            isFocusableInTouchMode = true
+            addView(
+                row,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            setOnKeyListener { _, keyCode, event ->
+                // Focusable overlay back button kha jata hai, isliye khud hi
+                // band kar dete hain.
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    hidePanel()
+                    true
+                } else {
+                    false
+                }
+            }
+        }
 
         val layout = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            // Yahan NOT_FOCUSABLE nahi hai - warna text box me keyboard hi
+            // nahi khulta.
+            0,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.BOTTOM
             y = dp(18)
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
         }
 
         runCatching {
-            manager.addView(row, layout)
-            panel = row
-            row.alpha = 0f
-            row.animate().alpha(1f).setDuration(160).start()
+            manager.addView(container, layout)
+            panel = container
+            container.alpha = 0f
+            container.animate().alpha(1f).setDuration(160).start()
+        }.onSuccess {
+            startBarMic()
         }
     }
 
     private fun hidePanel() {
+        stopBarMic()
         val view = panel ?: return
         panel = null
+        field = null
+        runCatching {
+            val imm = getSystemService(InputMethodManager::class.java)
+            imm?.hideSoftInputFromWindow(view.windowToken, 0)
+        }
         runCatching { windowManager?.removeView(view) }
     }
 
-    private fun roundButton(glyph: String, onClick: () -> Unit): View =
-        TextView(this).apply {
-            text = glyph
-            setTextColor(0xFFF2F5F2.toInt())
-            textSize = 18f
-            gravity = Gravity.CENTER
+    private fun iconButton(kind: Int, onClick: () -> Unit): View =
+        IconView(this, kind).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xF20B0D0B.toInt())
-                setStroke(dp(1), 0xFF1E241F.toInt())
+                setColor(SURFACE_HIGH)
+                setStroke(dp(1), OUTLINE)
             }
-            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
             setOnClickListener { onClick() }
-        }
-
-    private fun pill(): View =
-        TextView(this).apply {
-            text = "E.V se poochho\u2026"
-            setTextColor(0xFF7C857D.toInt())
-            textSize = 14f
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(26).toFloat()
-                setColor(0xF20B0D0B.toInt())
-                setStroke(dp(1), 0xFF1E241F.toInt())
-            }
-            layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
-            setOnClickListener { launchMain() }
         }
 
     private fun gap(): View =
         View(this).apply {
             layoutParams = ViewGroup.LayoutParams(dp(8), dp(1))
         }
+
+    // ------------------------------------------------------------ bar mic
+
+    /**
+     * Bar ke andar hi sunna.
+     *
+     * App kholna zaroori nahi - bolo, aur samajh me aate hi command chal
+     * jaati hai. Agar phone mic dene se mana kare (kuch phones background me
+     * overlay ko mic nahi dete) to chup-chaap poori app khol dete hain, wo
+     * bhi sunte hue - taaki user ka kaam na ruke.
+     */
+    private fun startBarMic() {
+        val granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted || !SpeechRecognizer.isRecognitionAvailable(this)) {
+            launchMain(listen = true)
+            return
+        }
+
+        stopBarMic()
+
+        val speech = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = speech
+
+        speech.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                setBarHint("SUN RAHA HOON\u2026")
+            }
+
+            override fun onBeginningOfSpeech() = Unit
+            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+            override fun onEndOfSpeech() {
+                setBarHint("SOCH RAHA HOON\u2026")
+            }
+
+            override fun onError(error: Int) {
+                releaseRecognizer()
+                when (error) {
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                    SpeechRecognizer.ERROR_CLIENT,
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                    -> launchMain(listen = true)
+
+                    else -> setBarHint("PHIR SE BOLO\u2026")
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                releaseRecognizer()
+                val heard = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    .orEmpty()
+                    .trim()
+                if (heard.isEmpty()) {
+                    setBarHint("KUCH SUNAI NAHI DIYA")
+                } else {
+                    launchMain(command = heard)
+                }
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                val heard = partialResults
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    .orEmpty()
+                if (heard.isNotBlank()) field?.setText(heard)
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) = Unit
+        })
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            // en-IN Hinglish ko Latin me likhta hai - Hindi keyboard wale
+            // shabdon se parser ka kaam mushkil ho jata hai.
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+        runCatching { speech.startListening(intent) }
+            .onFailure {
+                releaseRecognizer()
+                launchMain(listen = true)
+            }
+    }
+
+    private fun releaseRecognizer() {
+        val speech = recognizer ?: return
+        recognizer = null
+        runCatching { speech.destroy() }
+    }
+
+    private fun stopBarMic() {
+        val speech = recognizer ?: return
+        recognizer = null
+        runCatching {
+            speech.cancel()
+            speech.destroy()
+        }
+    }
+
+    private fun setBarHint(text: String) {
+        field?.hint = text
+    }
 
     // ------------------------------------------------------------ helpers
 
@@ -516,11 +690,27 @@ class BubbleService : Service() {
         val notification = buildNotification()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-            )
+            // Mic wala type sirf tab lagta hai jab RECORD_AUDIO mil chuki ho.
+            // Bina permission ke ye type dete hi Android app ko gira deta hai.
+            val granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            val type = if (granted) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            }
+
+            runCatching { startForeground(NOTIFICATION_ID, notification, type) }
+                .onFailure {
+                    runCatching {
+                        startForeground(
+                            NOTIFICATION_ID,
+                            notification,
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                        )
+                    }
+                }
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -555,7 +745,7 @@ class BubbleService : Service() {
 
         return builder
             .setContentTitle("E.V bubble chalu hai")
-            .setContentText("Tap - bar, double tap - mic, lamba dabao - band")
+            .setContentText("Tap - bar aur mic, double tap - app, lamba dabao - band")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(open)
             .setOngoing(true)
@@ -563,35 +753,120 @@ class BubbleService : Service() {
     }
 
     /**
+     * Bar ke gol buttons ke icon.
+     *
+     * App ke HUD wale buttons bhi Canvas pe bante hain, isliye yahan bhi wahi
+     * tarika hai - emoji dalne se har phone pe alag shakl aati aur design
+     * app se match nahi karta.
+     */
+    private class IconView(context: Context, private val kind: Int) : View(context) {
+
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            color = GREEN
+        }
+        private val box = RectF()
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+
+            val size = min(w, h)
+            val cx = w / 2f
+            val cy = h / 2f
+            paint.strokeWidth = size * 0.07f
+
+            when (kind) {
+                CAMERA -> {
+                    val bw = size * 0.54f
+                    val bh = size * 0.40f
+                    box.set(cx - bw / 2f, cy - bh / 2f + size * 0.04f, cx + bw / 2f, cy + bh / 2f + size * 0.04f)
+                    canvas.drawRoundRect(box, size * 0.09f, size * 0.09f, paint)
+                    canvas.drawCircle(cx, cy + size * 0.04f, size * 0.11f, paint)
+                    canvas.drawLine(
+                        cx - size * 0.08f,
+                        cy - bh / 2f + size * 0.04f,
+                        cx + size * 0.02f,
+                        cy - size * 0.26f,
+                        paint,
+                    )
+                }
+
+                MIC -> {
+                    val mw = size * 0.20f
+                    val mh = size * 0.36f
+                    box.set(cx - mw / 2f, cy - mh / 2f - size * 0.06f, cx + mw / 2f, cy + mh / 2f - size * 0.06f)
+                    canvas.drawRoundRect(box, mw / 2f, mw / 2f, paint)
+
+                    val arc = size * 0.30f
+                    box.set(cx - arc, cy - arc + size * 0.02f, cx + arc, cy + arc + size * 0.02f)
+                    canvas.drawArc(box, 20f, 140f, false, paint)
+
+                    canvas.drawLine(cx, cy + size * 0.24f, cx, cy + size * 0.34f, paint)
+                }
+
+                else -> {
+                    val arm = size * 0.20f
+                    canvas.drawLine(cx - arm, cy - arm, cx + arm, cy + arm, paint)
+                    canvas.drawLine(cx + arm, cy - arm, cx - arm, cy + arm, paint)
+                }
+            }
+        }
+
+        companion object {
+            const val CAMERA = 0
+            const val MIC = 1
+            const val CLOSE = 2
+            private const val GREEN = 0xFF00E676.toInt()
+        }
+    }
+
+    /**
      * Ghoomta hua taar wala gola.
      *
-     * App wala bada orb Compose se banta hai; use overlay me daalne ke liye
-     * poora lifecycle setup chahiye hota hai. Isliye yahan wahi shakl seedha
-     * Canvas pe banayi hai - kaali gend ke upar hari lakeeren, jo dheere
-     * dheere ghoomti hain. Lakeeren kinare pe paas paas aur beech me door
-     * dikhti hain, isi se gol hone ka ehsaas hota hai.
+     * Seedhi seedhi globe wali jaali (jaisi school ke naqshe pe hoti hai) us
+     * GIF jaisi nahi lagti. Wahan lakeeren tedhi-medhi hain, ek doosre ko
+     * kaatti hain, aur samne wali chamakti hai jabki peeche wali doob jaati
+     * hai. Isliye har lakeer ek jhuka hua chakkar hai jisme lehar (wobble)
+     * dali gayi hai, aur uski roshni is baat se tay hoti hai ki wo hissa gend
+     * ke samne hai ya peeche. Samne wale hisse pe halka blur bhi lagta hai -
+     * usi se neon wali chamak aati hai.
      */
     private class OrbView(context: Context) : View(context) {
 
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
         private val core = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
-        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val strand = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            color = GREEN
             strokeCap = Paint.Cap.ROUND
-        }
-        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
             color = GREEN
         }
-        private val oval = RectF()
+        private val haze = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            color = GREEN
+        }
 
         private var phase = 0f
         private var pressed = false
 
+        init {
+            // BlurMaskFilter hardware layer pe kaam nahi karta.
+            setLayerType(LAYER_TYPE_SOFTWARE, null)
+        }
+
         fun setPressedLook(value: Boolean) {
             pressed = value
             invalidate()
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            val blur = (min(w, h) * 0.045f).coerceAtLeast(1f)
+            haze.maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -602,59 +877,104 @@ class BubbleService : Service() {
             val cx = w / 2f
             val cy = h / 2f
             val outer = min(w, h) / 2f
-            val radius = outer * (if (pressed) 0.74f else 0.8f)
+            val radius = outer * (if (pressed) 0.72f else 0.78f)
 
             glow.shader = RadialGradient(
                 cx,
                 cy,
                 outer,
                 intArrayOf(GREEN_SOFT, GREEN_FADE, Color.TRANSPARENT),
-                floatArrayOf(0f, 0.6f, 1f),
+                floatArrayOf(0f, 0.62f, 1f),
                 Shader.TileMode.CLAMP,
             )
             canvas.drawCircle(cx, cy, outer, glow)
 
+            // Gend khud kaali hai - lakeeren usi pe tairti hain.
             canvas.drawCircle(cx, cy, radius, core)
 
-            // Kinare ki chamakti hui dhaar.
-            rim.strokeWidth = outer * 0.035f
-            rim.alpha = 220
-            canvas.drawCircle(cx, cy, radius, rim)
+            strand.strokeWidth = outer * 0.045f
+            haze.strokeWidth = outer * 0.085f
 
-            line.strokeWidth = outer * 0.028f
+            val spinCos = cos(phase)
+            val spinSin = sin(phase)
 
-            // Khade taar (meridian) - ghoomte hue patle-chaude hote hain.
-            for (i in 0 until MERIDIANS) {
-                val angle = phase + i * (Math.PI.toFloat() / MERIDIANS)
-                val halfWidth = abs(radius * cos(angle))
-                oval.set(cx - halfWidth, cy - radius, cx + halfWidth, cy + radius)
-                line.alpha = (70f + 170f * abs(sin(angle))).toInt().coerceIn(40, 255)
-                canvas.drawOval(oval, line)
-            }
+            for (i in 0 until STRANDS) {
+                val tilt = TILTS[i]
+                val wobble = WOBBLES[i]
+                val lobes = LOBES[i]
+                val twist = i * 0.9f
 
-            // Lete hue taar (latitude) - inse gend bharti hui lagti hai.
-            for (i in 1 until LATITUDES) {
-                val t = i.toFloat() / LATITUDES
-                val y = -radius + 2f * radius * t
-                val ratio = (1f - (y / radius) * (y / radius)).coerceAtLeast(0f)
-                val halfWidth = radius * sqrt(ratio)
-                val halfHeight = radius * 0.1f
-                oval.set(cx - halfWidth, cy + y - halfHeight, cx + halfWidth, cy + y + halfHeight)
-                line.alpha = 110
-                canvas.drawOval(oval, line)
+                val tiltCos = cos(tilt)
+                val tiltSin = sin(tilt)
+
+                var prevX = 0f
+                var prevY = 0f
+                var prevZ = 0f
+
+                for (s in 0..SEGMENTS) {
+                    val t = s.toFloat() / SEGMENTS
+                    val angle = t * TWO_PI
+
+                    // Chakkar ko upar-neeche lehra dete hain - isse lakeer
+                    // seedhi jaali jaisi nahi, behti hui lagti hai.
+                    val lift = wobble * sin(angle * lobes + twist)
+                    val liftCos = cos(lift)
+
+                    val x0 = liftCos * cos(angle)
+                    val y0 = sin(lift)
+                    val z0 = liftCos * sin(angle)
+
+                    // Har lakeer ka apna jhukav.
+                    val y1 = y0 * tiltCos - z0 * tiltSin
+                    val z1 = y0 * tiltSin + z0 * tiltCos
+
+                    // Poori gend ka ghoomna.
+                    val x2 = x0 * spinCos + z1 * spinSin
+                    val z2 = -x0 * spinSin + z1 * spinCos
+
+                    val sx = cx + radius * x2
+                    val sy = cy + radius * y1
+
+                    if (s > 0) {
+                        // 1 = bilkul samne, 0 = bilkul peeche.
+                        val depth = (((z2 + prevZ) / 2f) + 1f) / 2f
+                        val bright = depth * depth
+
+                        strand.alpha = (25f + 225f * bright).toInt().coerceIn(18, 255)
+                        canvas.drawLine(prevX, prevY, sx, sy, strand)
+
+                        if (bright > 0.55f) {
+                            haze.alpha = ((bright - 0.55f) * 200f).toInt().coerceIn(0, 90)
+                            canvas.drawLine(prevX, prevY, sx, sy, haze)
+                        }
+                    }
+
+                    prevX = sx
+                    prevY = sy
+                    prevZ = z2
+                }
             }
 
             phase += SPIN_STEP
-            postInvalidateOnAnimation()
+            // 60 fps ki zaroorat nahi - 30 pe bhi utna hi smooth lagta hai aur
+            // battery aadhi lagti hai.
+            postInvalidateDelayed(FRAME_MS)
         }
 
         private companion object {
             const val GREEN = 0xFF00E676.toInt()
             const val GREEN_SOFT = 0x5500E676
-            const val GREEN_FADE = 0x2200E676
-            const val MERIDIANS = 5
-            const val LATITUDES = 4
-            const val SPIN_STEP = 0.012f
+            const val GREEN_FADE = 0x1E00E676
+            const val STRANDS = 6
+            const val SEGMENTS = 36
+            const val SPIN_STEP = 0.022f
+            const val FRAME_MS = 33L
+            const val TWO_PI = 6.2831855f
+
+            /** Har lakeer ka jhukav, lehar ki gehrai aur lehron ki ginti. */
+            val TILTS = floatArrayOf(0.15f, 0.62f, 1.12f, 1.62f, 2.15f, 2.65f)
+            val WOBBLES = floatArrayOf(0.55f, 0.38f, 0.62f, 0.30f, 0.48f, 0.66f)
+            val LOBES = floatArrayOf(2f, 3f, 2f, 4f, 3f, 2f)
         }
     }
 
@@ -672,5 +992,12 @@ class BubbleService : Service() {
         const val PREFS = "ev_bubble"
         const val KEY_X = "x"
         const val KEY_Y = "y"
+
+        // App ke HUD wale rang - bar inhi se banti hai.
+        const val SURFACE = 0xF20B0D0B.toInt()
+        const val SURFACE_HIGH = 0xFF141815.toInt()
+        const val OUTLINE = 0xFF1E241F.toInt()
+        const val TEXT_PRIMARY = 0xFFF2F5F2.toInt()
+        const val TEXT_MUTED = 0xFF7C857D.toInt()
     }
 }

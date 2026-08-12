@@ -23,8 +23,10 @@
         Floating bubble.
         SYSTEM_ALERT_WINDOW runtime dialog se nahi milti \u2014 user ko Settings ki
         alag screen pe jaana padta hai, isliye app usi screen pe bhej deti hai.
-        Bubble wali service ka koi mic/camera kaam nahi hai, isliye uska
-        foreground type "specialUse" hai.
+        Bubble ke bar me apna mic bhi hai, isliye uska foreground type
+        "specialUse|microphone" hai. Mic wala hissa tabhi lagta hai jab
+        RECORD_AUDIO mila ho \u2014 warna Android 14 startForeground pe hi app
+        gira deta hai.
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -186,11 +188,11 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Har app ke upar tairta hua orb. -->
+        <!-- Har app ke upar tairta hua orb. Bar me apna mic bhi chalta hai. -->
         <service
             android:name=".feature.bubble.BubbleService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Floating assistant bubble shown over other apps" />
