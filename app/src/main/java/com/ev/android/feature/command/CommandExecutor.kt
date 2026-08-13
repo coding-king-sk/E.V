@@ -133,7 +133,7 @@ object CommandExecutor {
         is EvCommand.TypeText -> typeText(context, command)
 
         is EvCommand.Screen -> {
-            val result = ScreenTools.run(context, command.action)
+            val result = ScreenTools.run(context, command.action, command.target)
             if (result.ok) CommandResult.Success(result.message)
             else CommandResult.Failure(result.message)
         }
