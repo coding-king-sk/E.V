@@ -51,6 +51,7 @@ import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
 import com.ev.android.feature.command.CommandParser
+import com.ev.android.feature.command.CommandResult
 import com.ev.android.feature.command.EvCommand
 import com.ev.android.feature.history.CommandHistory
 import com.ev.android.feature.tts.Speaker
@@ -121,6 +122,14 @@ object Bubble {
  * jo bubble ka poora maqsad hi khatam kar deti thi. Ab parser, AI aur
  * executor sab yahin service me chalte hain; jawab bar me dikhta hai aur
  * sunai deta hai, aap jis app me the wahin rehte ho.
+ *
+ * Do cheezein yahan jaan-boojh ke bar ko hatati hain:
+ *
+ *  - **Screenshot/screen padhna**: E.V ke apne overlay pehle gayab hote hain,
+ *    warna user ke screenshot me orb aur bar hi baith jate hain.
+ *  - **Type karna**: bar ka apna text box focus me hota hai, isliye text usi me
+ *    gir jata tha. Type wali command se pehle bar band ho jati hai, taaki
+ *    focus wapas us app me chala jaye jisme likhna hai.
  */
 class BubbleService : Service() {
 
@@ -151,6 +160,9 @@ class BubbleService : Service() {
     /** Bar khuli reh gayi aur user kuch na kare to khud band ho jaye. */
     private val panelTimeout = Runnable { hidePanel() }
 
+    /** Screenshot ke baad overlay wapas laane wala kaam. */
+    private var restoreOverlays: Runnable? = null
+
     private var pendingTap: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -159,6 +171,10 @@ class BubbleService : Service() {
         super.onCreate()
         startInForeground()
         showOrb()
+
+        // Screenshot lene wala code service ko seedha nahi jaanta, isliye yahan
+        // apne aap ko register kar dete hain.
+        BubbleOverlays.hider = { millis -> handler.post { hideOverlaysFor(millis) } }
 
         // Command yahin chalegi, isliye jo cheezein app me thi wo yahan bhi
         // chahiye: bolne ke liye TTS, history, aur app ki list.
@@ -170,6 +186,7 @@ class BubbleService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        BubbleOverlays.hider = null
         handler.removeCallbacksAndMessages(null)
         stopBarMic()
         hidePanel()
@@ -194,6 +211,29 @@ class BubbleService : Service() {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
+
+    /**
+     * Kuch der ke liye E.V ke apne overlay gayab.
+     *
+     * Screenshot me jo screen pe hai wahi aata hai, isliye orb aur bar dono
+     * chhupane padte hain. Wapas laane ka kaam handler pe rakha hai; agar beech
+     * me dobara call aa jaye to purana wapasi ka kaam raddi me chala jata hai,
+     * warna overlay bahut jaldi wapas aa jate.
+     */
+    private fun hideOverlaysFor(millis: Long) {
+        restoreOverlays?.let { handler.removeCallbacks(it) }
+
+        orb?.visibility = View.GONE
+        panel?.visibility = View.GONE
+
+        val back = Runnable {
+            restoreOverlays = null
+            orb?.visibility = View.VISIBLE
+            panel?.visibility = View.VISIBLE
+        }
+        restoreOverlays = back
+        handler.postDelayed(back, millis)
+    }
 
     private fun showOrb() {
         if (!Bubble.canShow(this)) {
@@ -618,9 +658,14 @@ class BubbleService : Service() {
      * AI se seedha jawab. Jawab bar me dikhta hai aur bol ke bhi sunaya jata
      * hai.
      *
-     * Ek baat khyal rakhne wali: service runtime permission nahi maang sakti.
-     * Jis command ko contacts/SMS jaisi permission chahiye aur wo mili nahi
-     * hai, uska saaf message aa jayega - permission Settings se deni hogi.
+     * Do apwaad hain:
+     *
+     *  - Type aur screen wali command se pehle bar band kar dete hain. Bar ka
+     *    apna text box focus me hota hai aur bar screen pe dikhti hai, isliye
+     *    text usi me chala jata tha aur screenshot me bar aa jaati thi.
+     *  - Jis kaam ke liye runtime permission chahiye (contacts, SMS, call) wo
+     *    service maang hi nahi sakti. Aisi command fail hone par use app me
+     *    bhej dete hain, jahan permission ka dialog aa sakta hai.
      */
     private fun runInBar(spoken: String) {
         val text = spoken.trim()
@@ -655,6 +700,12 @@ class BubbleService : Service() {
                 return@launch
             }
 
+            // Bar khud raaste me aa jati hai - type aur screen wale kaam se
+            // pehle hat jao.
+            if (command is EvCommand.TypeText || command is EvCommand.Screen) {
+                hidePanel()
+            }
+
             val result = CommandExecutor.execute(this@BubbleService, command)
 
             CommandHistory.add(
@@ -664,9 +715,19 @@ class BubbleService : Service() {
                 reply = result.message,
             )
 
+            if (result is CommandResult.Failure && needsApp(result.message)) {
+                report("Iske liye permission chahiye - app me khol raha hoon")
+                launchMain(command = text)
+                return@launch
+            }
+
             report(result.message)
         }
     }
+
+    /** Permission wali dikkat? Phir ye kaam app me hona chahiye. */
+    private fun needsApp(message: String): Boolean =
+        message.contains("permission", ignoreCase = true)
 
     /** Jawab bar me dikhao aur bol do. */
     private fun report(message: String) {
