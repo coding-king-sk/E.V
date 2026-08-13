@@ -11,22 +11,21 @@ import android.view.accessibility.AccessibilityNodeInfo
 /**
  * E.V ka "haath".
  *
- * Android kisi app ko intent se WhatsApp ka Send button dabane nahi deta — wo
+ * Android kisi app ko intent se WhatsApp ka Send button dabane nahi deta - wo
  * jaan-boojh ke block hai. Sirf ek AccessibilityService hi screen ka button
  * actually tap kar sakti hai ya text box me likh sakti hai.
  *
  * Do kaam karti hai, aur dono "armed" hone par hi:
  *
- *  1. [armWhatsAppAutoSend] — WhatsApp ka Send button daba deti hai.
- *  2. [armTyping] — jo bhi text box screen pe focus me hai, usme likh deti hai
+ *  1. [armWhatsAppAutoSend] - WhatsApp ka Send button daba deti hai.
+ *  2. [armTyping] - jo bhi text box screen pe focus me hai, usme likh deti hai
  *     ("instagram pe type karo hello").
  *
  * Arm kiye bina ye service kuch nahi karti, aur arm hone ke baad bhi sirf 20-25
  * second ki window rehti hai. Kaam hote hi khud ko disarm kar leti hai.
  *
- * Iske alawa ye screen ko **padh** bhi sakti hai ([screenText]) — wahi cheez jo
- * screen reader padhta hai. Ye pura waqt chalu rehta hai, par sirf tab kaam
- * aata hai jab user khud poochhe.
+ * Iske alawa ye screen ko **padh** bhi sakti hai ([screenText]) aur screen ko
+ * upar-neeche [scroll] bhi kar sakti hai.
  */
 class EvAccessibilityService : AccessibilityService() {
 
@@ -75,17 +74,23 @@ class EvAccessibilityService : AccessibilityService() {
      * Jo text box abhi focus me hai usme likh do.
      *
      * Pehle focused node dhoondte hain (yahi 90% cases me sahi hota hai), warna
-     * poore tree me pehla editable box uthate hain — chat apps me wahi message
+     * poore tree me pehla editable box uthate hain - chat apps me wahi message
      * box hota hai.
+     *
+     * Ek zaroori pehra: E.V ka apna text box chhod dena hai. Bubble ki action
+     * bar bhi ek editable box hai aur wo aksar focus me hoti hai, isliye pehle
+     * text wahin gir jata tha - user ki app me kuch nahi likha jata tha.
      */
     private fun typeInto(root: AccessibilityNodeInfo, text: String): Boolean {
         val focused = runCatching {
             root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         }.getOrNull()
 
-        val target = focused?.takeIf { it.isEditable }
+        val target = focused?.takeIf { it.isEditable && !isOurs(it) }
             ?: findEditable(root, 0)
             ?: return false
+
+        if (isOurs(target)) return false
 
         // Box focus me na ho to pehle usme click karo, warna kuch apps text
         // set hone ke baad turant hata deti hain.
@@ -106,9 +111,13 @@ class EvAccessibilityService : AccessibilityService() {
         }.getOrDefault(false)
     }
 
+    /** Ye node E.V ka apna hai? (bubble ki action bar) */
+    private fun isOurs(node: AccessibilityNodeInfo): Boolean =
+        node.packageName?.toString() == getPackageName()
+
     private fun findEditable(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
         if (node == null || depth > MAX_TREE_DEPTH) return null
-        if (node.isEditable && node.isVisibleToUser) return node
+        if (node.isEditable && node.isVisibleToUser && !isOurs(node)) return node
 
         for (index in 0 until node.childCount) {
             findEditable(node.getChild(index), depth + 1)?.let { return it }
@@ -119,7 +128,7 @@ class EvAccessibilityService : AccessibilityService() {
     // ----------------------------------------------------------- whatsapp
 
     private fun clickSendButton(root: AccessibilityNodeInfo, packageName: String): Boolean {
-        // WhatsApp ka send FAB — stable resource id.
+        // WhatsApp ka send FAB - stable resource id.
         for (id in listOf("$packageName:id/send", "$packageName:id/send_container")) {
             val nodes = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()
             nodes?.forEach { node ->
@@ -162,10 +171,41 @@ class EvAccessibilityService : AccessibilityService() {
         return false
     }
 
+    // ----------------------------------------------------------- scrolling
+
+    /**
+     * Ungli jaisa swipe.
+     *
+     * Reels, shorts aur status wali screens me koi scrollable node nahi hota -
+     * wahan video ke upar seedha swipe hi chalta hai. Isliye node wala tarika
+     * fail hone par yahi aakhri sahara hai.
+     */
+    private fun swipe(forward: Boolean): Boolean {
+        val metrics = resources.displayMetrics
+        val x = metrics.widthPixels / 2f
+        val high = metrics.heightPixels * 0.75f
+        val low = metrics.heightPixels * 0.28f
+
+        val path = Path().apply {
+            if (forward) {
+                moveTo(x, high)
+                lineTo(x, low)
+            } else {
+                moveTo(x, low)
+                lineTo(x, high)
+            }
+        }
+
+        val stroke = GestureDescription.StrokeDescription(path, 0L, SWIPE_MS)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return runCatching { dispatchGesture(gesture, null, null) }.getOrDefault(false)
+    }
+
     companion object {
         private const val AUTO_SEND_WINDOW_MS = 20_000L
         private const val TYPING_WINDOW_MS = 25_000L
         private const val MAX_TREE_DEPTH = 30
+        private const val SWIPE_MS = 220L
 
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
         private val SEND_LABELS = listOf("send", "bhej", "\u092D\u0947\u091C")
@@ -199,7 +239,7 @@ class EvAccessibilityService : AccessibilityService() {
             autoSendDeadline = 0L
         }
 
-        /** App kholne se just pehle call karo — khulte hi text box bhar jayega. */
+        /** App kholne se just pehle call karo - khulte hi text box bhar jayega. */
         fun armTyping(text: String) {
             pendingText = text
             typingDeadline = SystemClock.elapsedRealtime() + TYPING_WINDOW_MS
@@ -214,7 +254,7 @@ class EvAccessibilityService : AccessibilityService() {
         fun performGlobal(action: Int): Boolean =
             runCatching { instance?.performGlobalAction(action) }.getOrNull() ?: false
 
-        /** Screen pe ek tap — gesture API se. */
+        /** Screen pe ek tap - gesture API se. */
         fun tap(x: Float, y: Float): Boolean {
             val service = instance ?: return false
             val path = Path().apply { moveTo(x, y) }
@@ -224,9 +264,47 @@ class EvAccessibilityService : AccessibilityService() {
         }
 
         /**
+         * Screen upar-neeche karo.
+         *
+         * @param forward true = neeche/agli reel, false = upar/pichli reel
+         */
+        fun scroll(forward: Boolean): Boolean {
+            val service = instance ?: return false
+
+            val action = if (forward) {
+                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            } else {
+                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            }
+
+            val root = runCatching { service.rootInActiveWindow }.getOrNull()
+            val scrollable = if (root != null) findScrollable(root, 0) else null
+
+            if (scrollable != null) {
+                val done = runCatching { scrollable.performAction(action) }.getOrDefault(false)
+                if (done) return true
+            }
+
+            return service.swipe(forward)
+        }
+
+        private fun findScrollable(
+            node: AccessibilityNodeInfo?,
+            depth: Int,
+        ): AccessibilityNodeInfo? {
+            if (node == null || depth > MAX_TREE_DEPTH) return null
+            if (node.isScrollable && node.isVisibleToUser) return node
+
+            for (index in 0 until node.childCount) {
+                findScrollable(node.getChild(index), depth + 1)?.let { return it }
+            }
+            return null
+        }
+
+        /**
          * Screen pe abhi jo dikh raha hai uska saara text.
          *
-         * Node ka text na ho to contentDescription le lete hain — icons aur
+         * Node ka text na ho to contentDescription le lete hain - icons aur
          * buttons ka matlab wahin chhupa hota hai. Ek hi text baar-baar na aaye
          * iska dhyan rakhte hain, warna list wali screens me wahi line 20 baar
          * aa jati hai aur AI ka poora context usi me chala jata hai.

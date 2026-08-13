@@ -10,7 +10,9 @@ import android.provider.MediaStore
 import com.ev.android.feature.accessibility.AccessibilityHelper
 import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.ai.Conversation
+import com.ev.android.feature.bubble.BubbleOverlays
 import com.ev.android.feature.launcher.AppLauncher
+import com.ev.android.feature.settings.EvSettings
 import kotlinx.coroutines.delay
 
 /** Screen ke saath E.V kya kar sakta hai. */
@@ -24,8 +26,14 @@ enum class ScreenAction {
     /** "screenshot lo" */
     SCREENSHOT,
 
-    /** "screenshot lekar bhejo" */
+    /** "screenshot le kar rehan ko bhejo" */
     SHARE_SHOT,
+
+    /** "scroll up", "upar karo" - pichli reel/post. */
+    SCROLL_UP,
+
+    /** "scroll down", "neeche karo" - agli reel/post. */
+    SCROLL_DOWN,
 }
 
 data class ScreenResult(val ok: Boolean, val message: String)
@@ -33,13 +41,17 @@ data class ScreenResult(val ok: Boolean, val message: String)
 /**
  * Screen wale kaam.
  *
- * Do alag raste hain, aur dono ki apni seema hai:
+ * Teen alag raste hain, aur teeno ki apni seema hai:
  *
  *  - **Padhna** Accessibility tree se hota hai. Isme wahi aata hai jo screen
  *    reader ko dikhta hai, yaani likha hua text. Photo ke andar ka text ya
  *    video ka content isme nahi aata.
  *  - **Screenshot** Accessibility ke global action se hota hai, jo Android 11
- *    se pehle exist hi nahi karta.
+ *    se pehle exist hi nahi karta. Lene se pehle E.V apne overlay chhupata hai,
+ *    warna user ke screenshot me bubble aur action bar bhi aa jate hain.
+ *  - **Scroll** pehle screen ke scrollable hisse se, aur wo na mile to seedha
+ *    ungli ki tarah swipe karke. Reels aur shorts scrollable node nahi hote,
+ *    isliye wahan swipe hi kaam karta hai.
  *
  * Screen recording alag cheez hai (MediaProjection), wo isme jaan-boojh ke
  * nahi hai - uske liye har baar system ka apna confirm dialog aata hai.
@@ -49,13 +61,25 @@ object ScreenTools {
     /** Screenshot gallery me aane me thoda waqt leta hai. */
     private const val SHOT_SETTLE_MS = 1800L
 
+    /** Itni der E.V ke overlay gayab rehte hain. */
+    private const val OVERLAY_HIDE_MS = 4000L
+
+    /** Overlay hatne ke baad ek pal ruk jao, warna wo shot me aa jate hain. */
+    private const val OVERLAY_SETTLE_MS = 450L
+
     private const val MAX_CHARS = 4000
 
-    suspend fun run(context: Context, action: ScreenAction): ScreenResult = when (action) {
+    suspend fun run(
+        context: Context,
+        action: ScreenAction,
+        target: String? = null,
+    ): ScreenResult = when (action) {
         ScreenAction.READ -> describe(context, translate = false)
         ScreenAction.TRANSLATE -> describe(context, translate = true)
         ScreenAction.SCREENSHOT -> takeScreenshot(context)
-        ScreenAction.SHARE_SHOT -> shotAndShare(context)
+        ScreenAction.SHARE_SHOT -> shotAndShare(context, target)
+        ScreenAction.SCROLL_UP -> scroll(forward = false)
+        ScreenAction.SCROLL_DOWN -> scroll(forward = true)
     }
 
     private suspend fun describe(context: Context, translate: Boolean): ScreenResult {
@@ -65,6 +89,9 @@ object ScreenTools {
                 "Screen padhne ke liye ek baar Accessibility me E.V on karna padega",
             )
         }
+
+        // Bar khuli ho to usi ka text padh lena bewakoofi hai - pehle use hatao.
+        if (BubbleOverlays.hideFor(OVERLAY_HIDE_MS)) delay(OVERLAY_SETTLE_MS)
 
         val text = EvAccessibilityService.screenText(MAX_CHARS)
             ?: return ScreenResult(false, "Screen pe padhne layak kuch mila hi nahi")
@@ -86,7 +113,14 @@ object ScreenTools {
         return ScreenResult(true, "Screen pe ye likha hai: " + short)
     }
 
-    private fun takeScreenshot(context: Context): ScreenResult {
+    /**
+     * Screenshot.
+     *
+     * Pehle E.V ke apne overlay hatte hain, phir ek pal ka intezaar, phir shot.
+     * Ye intezaar zaroori hai - window hatne me ek frame lagta hai aur usi ek
+     * frame me bubble shot me aa jata tha.
+     */
+    private suspend fun takeScreenshot(context: Context): ScreenResult {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             return ScreenResult(false, "Is Android version me E.V khud screenshot nahi le sakta")
         }
@@ -94,6 +128,8 @@ object ScreenTools {
         if (!AccessibilityHelper.isEnabled(context)) {
             return ScreenResult(false, "Screenshot ke liye Accessibility me E.V on karna padega")
         }
+
+        if (BubbleOverlays.hideFor(OVERLAY_HIDE_MS)) delay(OVERLAY_SETTLE_MS)
 
         val ok = EvAccessibilityService.performGlobal(
             AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT,
@@ -106,7 +142,15 @@ object ScreenTools {
         }
     }
 
-    private suspend fun shotAndShare(context: Context): ScreenResult {
+    /**
+     * Screenshot le kar bhejna.
+     *
+     * Naam bola ho to seedha WhatsApp khulta hai aur uski "send to" wali search
+     * me naam khud likh diya jata hai - bas contact pe tap karna reh jata hai.
+     * WhatsApp kisi bahar wali app ko contact chunne nahi deta, isliye ye aakhri
+     * tap hatana mumkin nahi hai; imaandari se itna hi ho sakta hai.
+     */
+    private suspend fun shotAndShare(context: Context, target: String?): ScreenResult {
         val taken = takeScreenshot(context)
         if (!taken.ok) return taken
 
@@ -117,16 +161,59 @@ object ScreenTools {
             "Screenshot to ho gaya, par gallery me mila nahi \u2014 khud bhej do",
         )
 
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "image/*"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val name = target?.takeIf { it.isNotBlank() }?.let { EvSettings.resolveAlias(context, it) }
+
+        if (name != null) {
+            // WhatsApp ki contact list me naam khud type ho jayega.
+            EvAccessibilityService.armTyping(name)
+
+            val toWhatsApp = shareIntent(uri).setPackage("com.whatsapp")
+            if (AppLauncher.startIntent(context, toWhatsApp)) {
+                return ScreenResult(
+                    true,
+                    "Screenshot WhatsApp me khol diya \u2014 " + name +
+                        " ka naam search me likh diya hai, tap kar do",
+                )
+            }
+
+            EvAccessibilityService.cancelTyping()
         }
 
-        return if (AppLauncher.startIntent(context, Intent.createChooser(send, "Screenshot bhejo"))) {
+        val chooser = Intent.createChooser(shareIntent(uri), "Screenshot bhejo")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        return if (AppLauncher.startIntent(context, chooser)) {
             ScreenResult(true, "Screenshot le liya \u2014 kisko bhejna hai chun lo")
         } else {
             ScreenResult(false, "Bhejne wali screen khul nahi payi")
+        }
+    }
+
+    private fun shareIntent(uri: Uri): Intent = Intent(Intent.ACTION_SEND).apply {
+        type = "image/*"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    /**
+     * Reels/shorts upar-neeche karna.
+     *
+     * Pehle screen ka scrollable hissa dhoondte hain; na mile to swipe. Video
+     * wali feeds me node scrollable nahi hoti, wahan swipe hi chalta hai.
+     */
+    private fun scroll(forward: Boolean): ScreenResult {
+        if (!EvAccessibilityService.isRunning()) {
+            return ScreenResult(
+                false,
+                "Scroll karne ke liye Accessibility me E.V on karna padega",
+            )
+        }
+
+        return if (EvAccessibilityService.scroll(forward)) {
+            ScreenResult(true, if (forward) "Neeche kar diya" else "Upar kar diya")
+        } else {
+            ScreenResult(false, "Is screen pe scroll nahi ho paya")
         }
     }
 
