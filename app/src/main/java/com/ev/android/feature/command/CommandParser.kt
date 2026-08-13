@@ -28,6 +28,8 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "google pe sachin search karo"         -> WebSearch("sachin")
  *  "photo lo"                             -> TakePhoto(front = false)
  *  "screen pe kya likha hai"              -> Screen(READ)
+ *  "screenshot le kar rehan ko bhejo"     -> Screen(SHARE_SHOT, "rehan")
+ *  "scroll down"                          -> Screen(SCROLL_DOWN)
  *  "volume 60% karo"                      -> Device(VOLUME_SET, 60)
  *  "torch on karo aur whatsapp kholo"     -> Multi([Device, OpenApp])
  *
@@ -128,6 +130,7 @@ object CommandParser {
         "screen par kya hai", "screen me kya hai", "screen pe kya chal raha hai",
         "ye screen kya hai", "isme kya likha hai", "ismein kya likha hai",
         "yahan kya likha hai", "what is on screen", "read the screen",
+        "skreen padho", "screen ka matlab batao", "screen dekh ke batao",
     )
 
     /** "screen translate karo", "ise translate karo" */
@@ -150,6 +153,49 @@ object CommandParser {
         "screenshot le kar bhejo", "screenshot leke bhejo", "screenshot share karo",
         "screenshot share", "screenshot send karo", "screen shot bhejo",
         "screenshot le kar send karo",
+    )
+
+    /**
+     * Bhejne wale shabd.
+     *
+     * Ye alag se isliye rakhe hain ki log poora vaakya kabhi ek jaisa nahi
+     * bolte — "screenshot le or rehan ko bhej" me na "screenshot bhejo" hai na
+     * "lekar bhejo". Screenshot + bhejna, dono mil jayein to matlab saaf hai.
+     */
+    private val screenSendWords = listOf(
+        "bhej", "bhejo", "bhej do", "bhejdo", "bhejna", "bhej dena",
+        "send", "send karo", "send kar do", "share", "share karo", "forward karo",
+    )
+
+    /** Naam nikalte waqt ye shabd hata dene hain. */
+    private val screenShotNoiseWords = listOf(
+        "screenshot", "screen shot", "screenshoot", "screen", "shot", "capture",
+        "le lo", "lekar", "leke", "le kar", "le", "lo", "karke", "kar ke", "kar",
+        "aur", "or", "phir", "fir", "then", "and", "iska", "isko", "ye", "yeh",
+    )
+
+    /**
+     * Reels/posts neeche karne ke shabd.
+     *
+     * "agli reel" bhi yahin hai — log scroll bolne ke bajaye seedha wahi bolte
+     * hain jo dekhna hai.
+     */
+    private val scrollDownWords = listOf(
+        "scroll down", "scroll niche", "scroll neeche", "scroll karo neeche",
+        "niche scroll", "neeche scroll", "niche scroll karo", "neeche scroll karo",
+        "niche karo", "neeche karo", "niche kar do", "neeche kar do",
+        "niche jao", "neeche jao", "scroll",
+        "next reel", "agli reel", "agla reel", "next post", "agli post",
+        "next short", "agla video dikhao",
+    )
+
+    /** Reels/posts upar karne ke shabd. */
+    private val scrollUpWords = listOf(
+        "scroll up", "scroll upar", "scroll uper", "scroll karo upar",
+        "upar scroll", "uper scroll", "upar scroll karo", "uper scroll karo",
+        "upar karo", "uper karo", "upar kar do", "uper kar do",
+        "upar jao", "uper jao",
+        "pichli reel", "pichla reel", "previous reel", "pichli post",
     )
 
     /**
@@ -381,7 +427,7 @@ object CommandParser {
     private val silentWords = listOf("silent")
     private val vibrateWords = listOf("vibrate", "vibration", "kampan")
     private val ringerWords = listOf("ringtone mode", "ring mode", "normal mode", "general mode")
-    private val screenshotWords = listOf("screenshot", "screen shot", "screen capture")
+    private val screenshotWords = listOf("screenshot", "screen shot", "screenshoot", "screen capture")
     private val lockWords = listOf("screen lock", "lock screen", "phone lock", "lock kar", "lock karo")
     private val homeWords = listOf("home jao", "home button", "home screen", "home pe jao")
     private val backWords = listOf("back jao", "back karo", "peeche jao", "wapas jao")
@@ -422,9 +468,13 @@ object CommandParser {
      *
      * Message aur reminder ke body me "aur" bahut aata hai ("bolo ki main aa
      * raha hoon aur khana laga do"), isliye "ki" wale vaakya kabhi nahi tootte.
+     *
+     * "screenshot le aur rehan ko bhej" bhi ek hi kaam hai, do nahi — isliye
+     * screenshot + bhejna wala vaakya bhi poora rehta hai.
      */
     private fun splitCommands(text: String): List<String> {
         if (kiRegex.containsMatchIn(text)) return listOf(text)
+        if (isShotAndSend(text)) return listOf(text)
         if (!joinRegex.containsMatchIn(text)) return listOf(text)
 
         return joinRegex.split(text)
@@ -439,7 +489,7 @@ object CommandParser {
     ): EvCommand {
         if (normalized.isEmpty()) return EvCommand.Unknown(raw)
 
-        // "screen pe kya likha hai", "screenshot lekar bhejo"
+        // "screen pe kya likha hai", "screenshot lekar bhejo", "scroll down"
         //
         // Sabse pehle — warna "screen pe kya hai" me "kya" dekh ke Info wali
         // branch, aur "screenshot bhejo" me "bhejo" dekh ke message wali branch
@@ -545,12 +595,19 @@ object CommandParser {
     /**
      * Screen wale kaam.
      *
-     * Bhejne wala screenshot pehle dekhte hain, warna "screenshot bhejo" sirf
+     * Scroll sabse pehle, phir bhejne wala screenshot, phir translate aur
+     * padhna. Bhejne wala pehle isliye ki "screenshot bhejo" warna sirf
      * screenshot le kar ruk jata.
      */
     private fun parseScreen(text: String): EvCommand? {
+        parseScroll(text)?.let { return it }
+
+        if (isShotAndSend(text)) {
+            return EvCommand.Screen(ScreenAction.SHARE_SHOT, screenShotTarget(text))
+        }
+
         if (screenShareShotWords.any { containsWord(text, it) }) {
-            return EvCommand.Screen(ScreenAction.SHARE_SHOT)
+            return EvCommand.Screen(ScreenAction.SHARE_SHOT, screenShotTarget(text))
         }
 
         if (screenTranslateWords.any { containsWord(text, it) }) {
@@ -559,6 +616,47 @@ object CommandParser {
 
         if (screenReadWords.any { containsWord(text, it) }) {
             return EvCommand.Screen(ScreenAction.READ)
+        }
+
+        return null
+    }
+
+    /** Screenshot bhi bola hai aur bhejna bhi — matlab ek hi kaam hai. */
+    private fun isShotAndSend(text: String): Boolean =
+        screenshotWords.any { containsWord(text, it) } &&
+            screenSendWords.any { containsWord(text, it) }
+
+    /**
+     * "screenshot le kar rehan ko bhejo" me se "rehan" nikalna.
+     *
+     * "ko" se pehle wala hissa hi naam hota hai; usme se screenshot aur lene
+     * wale shabd hata dete hain. Naam na mile to null — tab chooser khulega.
+     */
+    private fun screenShotTarget(text: String): String? {
+        val koMatch = koRegex.find(text) ?: return null
+
+        var before = text.substring(0, koMatch.range.first)
+        screenShotNoiseWords.forEach { before = before.replace(phraseRegex(it), " ") }
+
+        return cleanName(before).ifBlank { null }
+    }
+
+    /**
+     * "scroll down", "neeche karo", "agli reel".
+     *
+     * Awaaz aur brightness wale vaakya chhod dete hain — "awaaz upar karo" me
+     * user volume badhana chahta hai, reel badalna nahi.
+     */
+    private fun parseScroll(text: String): EvCommand? {
+        if (volumeWords.any { containsWord(text, it) }) return null
+        if (brightnessWords.any { containsWord(text, it) }) return null
+
+        if (scrollDownWords.any { containsWord(text, it) }) {
+            return EvCommand.Screen(ScreenAction.SCROLL_DOWN)
+        }
+
+        if (scrollUpWords.any { containsWord(text, it) }) {
+            return EvCommand.Screen(ScreenAction.SCROLL_UP)
         }
 
         return null

@@ -110,12 +110,15 @@ sealed interface EvCommand {
     data class TypeText(val text: String, val target: AppTarget?) : EvCommand
 
     /**
-     * \"screen pe kya likha hai\", \"screenshot lo\"
+     * \"screen pe kya likha hai\", \"screenshot le kar rehan ko bhejo\",
+     * \"scroll down\"
      *
-     * Screen padhna Accessibility se hota hai, isliye ye tabhi chalta hai jab
-     * user ne E.V ko Accessibility me on kiya ho.
+     * Ye sab Accessibility se hote hain, isliye tabhi chalte hain jab user ne
+     * E.V ko Accessibility me on kiya ho.
+     *
+     * @param target sirf SHARE_SHOT ke liye \u2014 kisko bhejna hai
      */
-    data class Screen(val action: ScreenAction) : EvCommand
+    data class Screen(val action: ScreenAction, val target: String? = null) : EvCommand
 
     /**
      * \"torch on karo aur whatsapp kholo\"
