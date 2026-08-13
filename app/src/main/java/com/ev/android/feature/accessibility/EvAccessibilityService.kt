@@ -23,6 +23,10 @@ import android.view.accessibility.AccessibilityNodeInfo
  *
  * Arm kiye bina ye service kuch nahi karti, aur arm hone ke baad bhi sirf 20-25
  * second ki window rehti hai. Kaam hote hi khud ko disarm kar leti hai.
+ *
+ * Iske alawa ye screen ko **padh** bhi sakti hai ([screenText]) — wahi cheez jo
+ * screen reader padhta hai. Ye pura waqt chalu rehta hai, par sirf tab kaam
+ * aata hai jab user khud poochhe.
  */
 class EvAccessibilityService : AccessibilityService() {
 
@@ -217,6 +221,47 @@ class EvAccessibilityService : AccessibilityService() {
             val stroke = GestureDescription.StrokeDescription(path, 0L, 60L)
             val gesture = GestureDescription.Builder().addStroke(stroke).build()
             return runCatching { service.dispatchGesture(gesture, null, null) }.getOrDefault(false)
+        }
+
+        /**
+         * Screen pe abhi jo dikh raha hai uska saara text.
+         *
+         * Node ka text na ho to contentDescription le lete hain — icons aur
+         * buttons ka matlab wahin chhupa hota hai. Ek hi text baar-baar na aaye
+         * iska dhyan rakhte hain, warna list wali screens me wahi line 20 baar
+         * aa jati hai aur AI ka poora context usi me chala jata hai.
+         *
+         * @return null agar service chalu nahi hai ya screen pe text hi nahi
+         */
+        fun screenText(limit: Int = 4000): String? {
+            val root = runCatching { instance?.rootInActiveWindow }.getOrNull() ?: return null
+
+            val out = StringBuilder()
+            collectText(root, 0, out, limit)
+
+            return out.toString().trim().ifBlank { null }
+        }
+
+        private fun collectText(
+            node: AccessibilityNodeInfo?,
+            depth: Int,
+            out: StringBuilder,
+            limit: Int,
+        ) {
+            if (node == null || depth > MAX_TREE_DEPTH || out.length >= limit) return
+
+            if (node.isVisibleToUser) {
+                val text = node.text?.toString()?.trim()
+                    ?: node.contentDescription?.toString()?.trim()
+
+                if (!text.isNullOrBlank() && !out.contains(text)) {
+                    out.append(text).append('\n')
+                }
+            }
+
+            for (index in 0 until node.childCount) {
+                collectText(node.getChild(index), depth + 1, out, limit)
+            }
         }
     }
 }

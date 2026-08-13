@@ -3,6 +3,7 @@ package com.ev.android.feature.command
 import com.ev.android.feature.device.DeviceAction
 import com.ev.android.feature.info.InfoKind
 import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.screen.ScreenAction
 
 /**
  * Ek app jise E.V khol sakta hai.
@@ -107,6 +108,14 @@ sealed interface EvCommand {
      * to jo app abhi khuli hai usi me type hota hai.
      */
     data class TypeText(val text: String, val target: AppTarget?) : EvCommand
+
+    /**
+     * \"screen pe kya likha hai\", \"screenshot lo\"
+     *
+     * Screen padhna Accessibility se hota hai, isliye ye tabhi chalta hai jab
+     * user ne E.V ko Accessibility me on kiya ho.
+     */
+    data class Screen(val action: ScreenAction) : EvCommand
 
     /**
      * \"torch on karo aur whatsapp kholo\"
