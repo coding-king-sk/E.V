@@ -318,6 +318,14 @@ fun LauncherScreen(
         }
     }
 
+    /**
+     * Hands-free ka switch \u2014 sirf haath se.
+     *
+     * Pehle ye app khulte hi apne aap chalu ho jata tha. Natija: har baar app
+     * kholte hi mic zinda, notification zinda, aur battery kharch \u2014 chahe
+     * user ko sirf history dekhni ho. Ab jab tak khud MIC na dabao, E.V
+     * sunta nahi.
+     */
     fun toggleHandsFree() {
         if (EvListeningService.isRunning) {
             EvListeningService.stop(context)
@@ -343,24 +351,6 @@ fun LauncherScreen(
         handsFreePaused = false
         EvListeningService.start(context)
         handsFree = true
-    }
-
-    /**
-     * App khulte hi hands-free apne aap on.
-     *
-     * Toggle sirf isliye bacha hai ki kabhi khud band karna ho \u2014 roz roz on
-     * karne ki zaroorat nahi.
-     */
-    LaunchedEffect(Unit) {
-        if (EvListeningService.isRunning) return@LaunchedEffect
-
-        val missing = micPermissionsMissing()
-        if (missing.isEmpty()) {
-            EvListeningService.start(context)
-            handsFree = true
-        } else {
-            micLauncher.launch(missing.toTypedArray())
-        }
     }
 
     /** Permission maango (agar chahiye) phir command chalao. */
