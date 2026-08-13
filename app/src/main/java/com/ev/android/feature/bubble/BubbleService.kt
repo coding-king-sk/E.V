@@ -13,11 +13,13 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.SweepGradient
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -42,7 +44,22 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.ev.android.MainActivity
+import com.ev.android.feature.ai.AiCommandResolver
+import com.ev.android.feature.ai.AiOutcome
+import com.ev.android.feature.ai.Conversation
+import com.ev.android.feature.apps.InstalledApp
+import com.ev.android.feature.apps.InstalledAppsRepository
+import com.ev.android.feature.command.CommandExecutor
+import com.ev.android.feature.command.CommandParser
+import com.ev.android.feature.command.EvCommand
+import com.ev.android.feature.history.CommandHistory
+import com.ev.android.feature.tts.Speaker
 import com.ev.android.feature.voice.EvListeningService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
@@ -98,7 +115,12 @@ object Bubble {
  * Drag        -> chhodte hi kinare pe chipak jata hai
  * Neeche X pe chhodo -> bubble abhi ke liye band
  * Lamba dabao -> bubble band
- * Kuch der haath na lage -> halka transparent, aur ghoomna bhi ruk jata hai
+ *
+ * **Command bar me hi chalti hai.** Pehle bubble sirf app kholta tha aur
+ * command app ko de deta tha - matlab har baar poori app saamne aa jaati thi,
+ * jo bubble ka poora maqsad hi khatam kar deti thi. Ab parser, AI aur
+ * executor sab yahin service me chalte hain; jawab bar me dikhta hai aur
+ * sunai deta hai, aap jis app me the wahin rehte ho.
  */
 class BubbleService : Service() {
 
@@ -111,16 +133,18 @@ class BubbleService : Service() {
 
     private var recognizer: SpeechRecognizer? = null
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var apps: List<InstalledApp> = emptyList()
+
     private val handler = Handler(Looper.getMainLooper())
     private val fadeRunnable = Runnable {
         val view = orb ?: return@Runnable
         view.animate()
             .alpha(IDLE_ALPHA)
             .setDuration(400)
-            // Jab tak koi dekh hi nahi raha, ghoomte rehne ka koi fayda nahi -
-            // isse phone ka CPU khali baithta hai aur doosri apps tez chalti
-            // hain.
-            .withEndAction { view.setSpinning(false) }
+            // Ghoomna band nahi hota - halka hoke bhi orb zinda dikhna chahiye.
+            // Bas raftaar aadhi kar dete hain, taaki baaki apps ko CPU mile.
+            .withEndAction { view.setIdle(true) }
             .start()
     }
 
@@ -135,6 +159,12 @@ class BubbleService : Service() {
         super.onCreate()
         startInForeground()
         showOrb()
+
+        // Command yahin chalegi, isliye jo cheezein app me thi wo yahan bhi
+        // chahiye: bolne ke liye TTS, history, aur app ki list.
+        CommandHistory.load(this)
+        Speaker.init(this)
+        scope.launch { apps = InstalledAppsRepository.load(this@BubbleService) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -144,6 +174,8 @@ class BubbleService : Service() {
         stopBarMic()
         hidePanel()
         hideTrash()
+        Speaker.stop()
+        scope.cancel()
         orb?.let { view ->
             // Service maut ke waqt view hataana zaroori hai, warna orb screen pe
             // atka reh jata hai aur phone restart tak nahi jata.
@@ -344,11 +376,11 @@ class BubbleService : Service() {
 
     // ------------------------------------------------------------ fade
 
-    /** Haath lagte hi poora saaf, aur ghoomna dobara chalu. */
+    /** Haath lagte hi poora saaf aur poori raftaar. */
     private fun wakeUp() {
         handler.removeCallbacks(fadeRunnable)
         val view = orb ?: return
-        view.setSpinning(true)
+        view.setIdle(false)
         view.animate().alpha(1f).setDuration(120).start()
     }
 
@@ -428,25 +460,16 @@ class BubbleService : Service() {
      * Single tap wala action bar.
      *
      * Design app ki HUD jaisa hai - kaala card, hari dhaar, aur andar wahi
-     * gol buttons jo home screen pe hain.
-     *
-     * Bar khulte hi command wala mic chalu ho jata hai. Bar apne aap band ho
-     * jati hai agar user kuch na kare, ya kahin bhi bahar tap kar de - screen
-     * pe atki hui patti se zyada chidhane wali cheez koi nahi.
+     * gol buttons jo home screen pe hain. Kinare pe ek chalti hui hari roshni
+     * ghoomti rehti hai, jisse pata chalta hai ki E.V zinda hai.
      */
     private fun showPanel() {
         val manager = windowManager ?: return
 
-        val row = LinearLayout(this).apply {
+        val row = GlowBar(this, dp(28).toFloat(), dp(2).toFloat()).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(28).toFloat()
-                setColor(SURFACE)
-                setStroke(dp(1), OUTLINE)
-            }
         }
 
         val input = EditText(this).apply {
@@ -471,7 +494,7 @@ class BubbleService : Service() {
                     actionId == EditorInfo.IME_ACTION_GO
                 if (done) {
                     val typed = text?.toString().orEmpty().trim()
-                    if (typed.isNotEmpty()) launchMain(command = typed)
+                    if (typed.isNotEmpty()) runInBar(typed)
                 }
                 done
             }
@@ -479,7 +502,7 @@ class BubbleService : Service() {
         }
         field = input
 
-        row.addView(iconButton(IconView.CAMERA) { launchMain(command = "photo lo") })
+        row.addView(iconButton(IconView.CAMERA) { runInBar("photo lo") })
         row.addView(gap())
         row.addView(input)
         row.addView(gap())
@@ -586,6 +609,72 @@ class BubbleService : Service() {
             layoutParams = ViewGroup.LayoutParams(dp(8), dp(1))
         }
 
+    // ------------------------------------------------------- command
+
+    /**
+     * Command bar me hi chalti hai - app nahi khulti.
+     *
+     * Wahi teen seedhiyan jo app me hain: offline parser -> AI se command ->
+     * AI se seedha jawab. Jawab bar me dikhta hai aur bol ke bhi sunaya jata
+     * hai.
+     *
+     * Ek baat khyal rakhne wali: service runtime permission nahi maang sakti.
+     * Jis command ko contacts/SMS jaisi permission chahiye aur wo mili nahi
+     * hai, uska saaf message aa jayega - permission Settings se deni hogi.
+     */
+    private fun runInBar(spoken: String) {
+        val text = spoken.trim()
+        if (text.isEmpty()) return
+
+        keepPanelAlive()
+        stopBarMic()
+        field?.setText("")
+        setBarHint("SOCH RAHA HOON\u2026")
+
+        scope.launch {
+            var command: EvCommand = CommandParser.parse(text, apps)
+
+            if (command is EvCommand.Unknown) {
+                val outcome = AiCommandResolver.resolve(this@BubbleService, text, apps)
+                if (outcome is AiOutcome.Resolved) command = outcome.command
+            }
+
+            if (command is EvCommand.Unknown) {
+                // Command nahi hai - shayad sawaal hai.
+                val reply = Conversation.answer(this@BubbleService, text)
+                    ?: "Samajh nahi aaya. App ke API KEY button me Groq key daal do."
+
+                CommandHistory.add(
+                    context = this@BubbleService,
+                    spoken = text,
+                    understood = "Samajh nahi aaya",
+                    reply = reply,
+                )
+
+                report(reply)
+                return@launch
+            }
+
+            val result = CommandExecutor.execute(this@BubbleService, command)
+
+            CommandHistory.add(
+                context = this@BubbleService,
+                spoken = text,
+                understood = CommandHistory.describe(command),
+                reply = result.message,
+            )
+
+            report(result.message)
+        }
+    }
+
+    /** Jawab bar me dikhao aur bol do. */
+    private fun report(message: String) {
+        keepPanelAlive()
+        setBarHint(message.uppercase())
+        Speaker.speak(message)
+    }
+
     // ------------------------------------------------------------ bar mic
 
     /**
@@ -643,7 +732,6 @@ class BubbleService : Service() {
                 when (error) {
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
                     SpeechRecognizer.ERROR_CLIENT,
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
                     -> launchMain(listen = true)
 
                     else -> setBarHint("PHIR SE BOLO\u2026")
@@ -660,7 +748,7 @@ class BubbleService : Service() {
                 if (heard.isEmpty()) {
                     setBarHint("KUCH SUNAI NAHI DIYA")
                 } else {
-                    launchMain(command = heard)
+                    runInBar(heard)
                 }
             }
 
@@ -806,6 +894,90 @@ class BubbleService : Service() {
     }
 
     /**
+     * Action bar ka dabba, jiske kinare pe hari roshni ghoomti rehti hai.
+     *
+     * Sirf ek seedhi hari line rakhne se bar mari hui lagti thi. Yahan ek
+     * sweep gradient ghoomta hai, isliye lagta hai ki roshni kinare kinare
+     * daud rahi hai - wahi "sun raha hoon" wala ehsaas jo assistant bars me
+     * hota hai.
+     */
+    private class GlowBar(
+        context: Context,
+        private val radius: Float,
+        strokePx: Float,
+    ) : LinearLayout(context) {
+
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = SURFACE
+        }
+        private val base = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = strokePx
+            color = OUTLINE
+        }
+        private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = strokePx
+        }
+
+        private val box = RectF()
+        private val spin = Matrix()
+        private var sweep: SweepGradient? = null
+        private var phase = 0f
+
+        init {
+            // ViewGroup default me khud kuch draw nahi karta.
+            setWillNotDraw(false)
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            if (w <= 0 || h <= 0) return
+
+            sweep = SweepGradient(
+                w / 2f,
+                h / 2f,
+                intArrayOf(
+                    GREEN_CLEAR,
+                    GREEN_BRIGHT,
+                    GREEN_HALF,
+                    GREEN_CLEAR,
+                    GREEN_CLEAR,
+                ),
+                floatArrayOf(0f, 0.08f, 0.20f, 0.42f, 1f),
+            )
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+
+            val inset = base.strokeWidth / 2f
+            box.set(inset, inset, width - inset, height - inset)
+
+            canvas.drawRoundRect(box, radius, radius, fill)
+            canvas.drawRoundRect(box, radius, radius, base)
+
+            val shader = sweep ?: return
+            spin.setRotate(phase, width / 2f, height / 2f)
+            shader.setLocalMatrix(spin)
+            glow.shader = shader
+            canvas.drawRoundRect(box, radius, radius, glow)
+
+            phase += 2.5f
+            if (phase >= 360f) phase -= 360f
+            postInvalidateDelayed(FRAME_MS)
+        }
+
+        private companion object {
+            const val GREEN_BRIGHT = 0xFF5CFFB0.toInt()
+            const val GREEN_HALF = 0x9900E676.toInt()
+            const val GREEN_CLEAR = 0x0000E676
+            const val FRAME_MS = 33L
+        }
+    }
+
+    /**
      * Bar ke gol buttons ke icon.
      *
      * App ke HUD wale buttons bhi Canvas pe bante hain, isliye yahan bhi wahi
@@ -883,12 +1055,11 @@ class BubbleService : Service() {
      * Har lakeer ek jhuka hua chakkar hai jisme lehar dali gayi hai. Do
      * cheezein alag alag chalti hain: poori gend apni raftaar se ghoomti hai,
      * aur har lakeer ki lehar bhi apni raftaar se sarakti hai - isi se aisa
-     * lagta hai ki taar khud bhi bal kha rahe hain, sirf gola nahi ghoom raha.
+     * lagta hai ki taar khud bhi bal kha rahe hain.
      *
-     * Chamak blur se nahi banti - blur ke liye poora view software pe draw
-     * karna padta hai, jo phone ko dheema kar deta hai. Uski jagah har lakeer
-     * ke neeche ek chaudi halki lakeer hai, jisse wahi neon wala ehsaas aa
-     * jata hai aur GPU ka kaam bhi kam rehta hai.
+     * Idle hone pe ghoomna rukta nahi, sirf dheema ho jata hai - halka sa
+     * hilta hua orb zinda lagta hai, aur aadhe frames me CPU bhi bach jata
+     * hai.
      */
     private class OrbView(context: Context) : View(context) {
 
@@ -907,18 +1078,18 @@ class BubbleService : Service() {
 
         private var phase = 0f
         private var pressed = false
-        private var spinning = true
+        private var idle = false
 
         fun setPressedLook(value: Boolean) {
             pressed = value
             invalidate()
         }
 
-        /** Idle hone pe ghoomna band - CPU doosri apps ko mil jata hai. */
-        fun setSpinning(value: Boolean) {
-            if (spinning == value) return
-            spinning = value
-            if (value) invalidate()
+        /** Idle = dheemi chaal, band nahi. */
+        fun setIdle(value: Boolean) {
+            if (idle == value) return
+            idle = value
+            invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -1010,12 +1181,8 @@ class BubbleService : Service() {
                 }
             }
 
-            if (spinning) {
-                phase += SPIN_STEP
-                // 60 fps ki zaroorat nahi - 30 pe bhi utna hi smooth lagta hai
-                // aur baaki apps ko CPU mil jata hai.
-                postInvalidateDelayed(FRAME_MS)
-            }
+            phase += if (idle) SPIN_STEP * 0.5f else SPIN_STEP
+            postInvalidateDelayed(if (idle) IDLE_FRAME_MS else FRAME_MS)
         }
 
         private companion object {
@@ -1026,6 +1193,7 @@ class BubbleService : Service() {
             const val SEGMENTS = 30
             const val SPIN_STEP = 0.022f
             const val FRAME_MS = 33L
+            const val IDLE_FRAME_MS = 66L
             const val TWO_PI = 6.2831855f
 
             /** Jhukav, lehar ki gehrai, lehron ki ginti. */
@@ -1046,7 +1214,9 @@ class BubbleService : Service() {
         const val LONG_PRESS_MS = 600L
         const val DOUBLE_TAP_MS = 280L
         const val SNAP_MS = 180L
-        const val IDLE_MS = 4000L
+
+        /** Itni der haath na lage to orb halka pad jata hai. */
+        const val IDLE_MS = 10_000L
         const val IDLE_ALPHA = 0.45f
 
         /** Bar itni der bekaar khadi rahe to khud band. */
