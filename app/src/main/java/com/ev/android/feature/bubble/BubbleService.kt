@@ -11,7 +11,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -43,6 +42,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.ev.android.MainActivity
+import com.ev.android.feature.voice.EvListeningService
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
@@ -92,17 +92,13 @@ object Bubble {
 /**
  * Har app ke upar tairta hua E.V ka orb.
  *
- * Ye foreground service hai kyunki Android background me overlay dikhane wali
- * service ko chup-chaap maar deta hai. Notification ki importance sabse kam
- * rakhi hai taaki wo chup rahe.
- *
- * Single tap  -> neeche action bar khulta hai AUR mic turant sunne lagta hai.
- *                Wake word bolne ki zaroorat nahi - tap hi jagana hai.
+ * Single tap  -> neeche action bar khulta hai AUR command wala mic turant
+ *                sunne lagta hai. Wake word bolne ki zaroorat nahi.
  * Double tap  -> poori app khul jati hai, wo bhi sunte hue
  * Drag        -> chhodte hi kinare pe chipak jata hai
  * Neeche X pe chhodo -> bubble abhi ke liye band
  * Lamba dabao -> bubble band
- * Kuch der haath na lage -> halka transparent
+ * Kuch der haath na lage -> halka transparent, aur ghoomna bhi ruk jata hai
  */
 class BubbleService : Service() {
 
@@ -117,8 +113,20 @@ class BubbleService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val fadeRunnable = Runnable {
-        orb?.animate()?.alpha(IDLE_ALPHA)?.setDuration(400)?.start()
+        val view = orb ?: return@Runnable
+        view.animate()
+            .alpha(IDLE_ALPHA)
+            .setDuration(400)
+            // Jab tak koi dekh hi nahi raha, ghoomte rehne ka koi fayda nahi -
+            // isse phone ka CPU khali baithta hai aur doosri apps tez chalti
+            // hain.
+            .withEndAction { view.setSpinning(false) }
+            .start()
     }
+
+    /** Bar khuli reh gayi aur user kuch na kare to khud band ho jaye. */
+    private val panelTimeout = Runnable { hidePanel() }
+
     private var pendingTap: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -336,10 +344,12 @@ class BubbleService : Service() {
 
     // ------------------------------------------------------------ fade
 
-    /** Haath lagte hi poora saaf. */
+    /** Haath lagte hi poora saaf, aur ghoomna dobara chalu. */
     private fun wakeUp() {
         handler.removeCallbacks(fadeRunnable)
-        orb?.animate()?.alpha(1f)?.setDuration(120)?.start()
+        val view = orb ?: return
+        view.setSpinning(true)
+        view.animate().alpha(1f).setDuration(120).start()
     }
 
     /** Kuch der kuch na ho to dheere se halka pad jata hai. */
@@ -418,11 +428,11 @@ class BubbleService : Service() {
      * Single tap wala action bar.
      *
      * Design app ki HUD jaisa hai - kaala card, hari dhaar, aur andar wahi
-     * gol buttons jo home screen pe hain. Poori app kholne ki zaroorat nahi;
-     * peeche wali app dikhti rehti hai.
+     * gol buttons jo home screen pe hain.
      *
-     * Khulte hi mic bhi chalu ho jata hai - tap hi "jagana" hai, wake word
-     * bolne ki zaroorat nahi.
+     * Bar khulte hi command wala mic chalu ho jata hai. Bar apne aap band ho
+     * jati hai agar user kuch na kare, ya kahin bhi bahar tap kar de - screen
+     * pe atki hui patti se zyada chidhane wali cheez koi nahi.
      */
     private fun showPanel() {
         val manager = windowManager ?: return
@@ -465,6 +475,7 @@ class BubbleService : Service() {
                 }
                 done
             }
+            setOnClickListener { keepPanelAlive() }
         }
         field = input
 
@@ -497,15 +508,27 @@ class BubbleService : Service() {
                     false
                 }
             }
+            setOnTouchListener { _, event ->
+                // Bar ke bahar kahin bhi tap - band.
+                if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                    hidePanel()
+                    true
+                } else {
+                    false
+                }
+            }
         }
 
         val layout = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(),
-            // Yahan NOT_FOCUSABLE nahi hai - warna text box me keyboard hi
-            // nahi khulta.
-            0,
+            // NOT_FOCUSABLE nahi hai - warna text box me keyboard hi nahi
+            // khulta. NOT_TOUCH_MODAL se bahar ke tap neeche wali app tak
+            // pahunchte hain, aur WATCH_OUTSIDE_TOUCH se humein bhi khabar
+            // mil jati hai ki bahar tap hua.
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.BOTTOM
@@ -520,11 +543,19 @@ class BubbleService : Service() {
             container.alpha = 0f
             container.animate().alpha(1f).setDuration(160).start()
         }.onSuccess {
+            keepPanelAlive()
             startBarMic()
         }
     }
 
+    /** Jab bhi user kuch kare, band hone ki ginti dobara shuru. */
+    private fun keepPanelAlive() {
+        handler.removeCallbacks(panelTimeout)
+        handler.postDelayed(panelTimeout, PANEL_IDLE_MS)
+    }
+
     private fun hidePanel() {
+        handler.removeCallbacks(panelTimeout)
         stopBarMic()
         val view = panel ?: return
         panel = null
@@ -544,7 +575,10 @@ class BubbleService : Service() {
                 setStroke(dp(1), OUTLINE)
             }
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
-            setOnClickListener { onClick() }
+            setOnClickListener {
+                keepPanelAlive()
+                onClick()
+            }
         }
 
     private fun gap(): View =
@@ -555,12 +589,12 @@ class BubbleService : Service() {
     // ------------------------------------------------------------ bar mic
 
     /**
-     * Bar ke andar hi sunna.
+     * Bar ke andar hi sunna - wahi command wala mic jo home screen pe hai.
      *
-     * App kholna zaroori nahi - bolo, aur samajh me aate hi command chal
-     * jaati hai. Agar phone mic dene se mana kare (kuch phones background me
-     * overlay ko mic nahi dete) to chup-chaap poori app khol dete hain, wo
-     * bhi sunte hue - taaki user ka kaam na ruke.
+     * Hands-free wala listener aur ye dono ek saath mic nahi le sakte; Android
+     * doosre ko seedha ERROR_RECOGNIZER_BUSY de deta hai. Isliye bar ka mic
+     * chalte waqt hands-free ko band kar dete hain - user ne tap karke bola
+     * hai, ab wake word ka intezaar karne ka koi matlab nahi.
      */
     private fun startBarMic() {
         val granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -572,15 +606,31 @@ class BubbleService : Service() {
 
         stopBarMic()
 
+        if (EvListeningService.isRunning) {
+            EvListeningService.stop(this)
+            setBarHint("MIC LE RAHA HOON\u2026")
+            // Mic chhootne me ek pal lagta hai.
+            handler.postDelayed({ if (panel != null) beginRecognition() }, MIC_HANDOVER_MS)
+            return
+        }
+
+        beginRecognition()
+    }
+
+    private fun beginRecognition() {
         val speech = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = speech
 
         speech.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
+                keepPanelAlive()
                 setBarHint("SUN RAHA HOON\u2026")
             }
 
-            override fun onBeginningOfSpeech() = Unit
+            override fun onBeginningOfSpeech() {
+                keepPanelAlive()
+            }
+
             override fun onRmsChanged(rmsdB: Float) = Unit
             override fun onBufferReceived(buffer: ByteArray?) = Unit
 
@@ -619,7 +669,10 @@ class BubbleService : Service() {
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
                     .orEmpty()
-                if (heard.isNotBlank()) field?.setText(heard)
+                if (heard.isNotBlank()) {
+                    keepPanelAlive()
+                    field?.setText(heard)
+                }
             }
 
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -630,8 +683,8 @@ class BubbleService : Service() {
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
             )
-            // en-IN Hinglish ko Latin me likhta hai - Hindi keyboard wale
-            // shabdon se parser ka kaam mushkil ho jata hai.
+            // en-IN Hinglish ko Latin me likhta hai - Devanagari se parser ka
+            // kaam mushkil ho jata hai.
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
@@ -827,13 +880,15 @@ class BubbleService : Service() {
     /**
      * Ghoomta hua taar wala gola.
      *
-     * Seedhi seedhi globe wali jaali (jaisi school ke naqshe pe hoti hai) us
-     * GIF jaisi nahi lagti. Wahan lakeeren tedhi-medhi hain, ek doosre ko
-     * kaatti hain, aur samne wali chamakti hai jabki peeche wali doob jaati
-     * hai. Isliye har lakeer ek jhuka hua chakkar hai jisme lehar (wobble)
-     * dali gayi hai, aur uski roshni is baat se tay hoti hai ki wo hissa gend
-     * ke samne hai ya peeche. Samne wale hisse pe halka blur bhi lagta hai -
-     * usi se neon wali chamak aati hai.
+     * Har lakeer ek jhuka hua chakkar hai jisme lehar dali gayi hai. Do
+     * cheezein alag alag chalti hain: poori gend apni raftaar se ghoomti hai,
+     * aur har lakeer ki lehar bhi apni raftaar se sarakti hai - isi se aisa
+     * lagta hai ki taar khud bhi bal kha rahe hain, sirf gola nahi ghoom raha.
+     *
+     * Chamak blur se nahi banti - blur ke liye poora view software pe draw
+     * karna padta hai, jo phone ko dheema kar deta hai. Uski jagah har lakeer
+     * ke neeche ek chaudi halki lakeer hai, jisse wahi neon wala ehsaas aa
+     * jata hai aur GPU ka kaam bhi kam rehta hai.
      */
     private class OrbView(context: Context) : View(context) {
 
@@ -844,7 +899,7 @@ class BubbleService : Service() {
             strokeCap = Paint.Cap.ROUND
             color = GREEN
         }
-        private val haze = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             color = GREEN
@@ -852,21 +907,18 @@ class BubbleService : Service() {
 
         private var phase = 0f
         private var pressed = false
-
-        init {
-            // BlurMaskFilter hardware layer pe kaam nahi karta.
-            setLayerType(LAYER_TYPE_SOFTWARE, null)
-        }
+        private var spinning = true
 
         fun setPressedLook(value: Boolean) {
             pressed = value
             invalidate()
         }
 
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            val blur = (min(w, h) * 0.045f).coerceAtLeast(1f)
-            haze.maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
+        /** Idle hone pe ghoomna band - CPU doosri apps ko mil jata hai. */
+        fun setSpinning(value: Boolean) {
+            if (spinning == value) return
+            spinning = value
+            if (value) invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -893,16 +945,21 @@ class BubbleService : Service() {
             canvas.drawCircle(cx, cy, radius, core)
 
             strand.strokeWidth = outer * 0.045f
-            haze.strokeWidth = outer * 0.085f
-
-            val spinCos = cos(phase)
-            val spinSin = sin(phase)
+            halo.strokeWidth = outer * 0.115f
 
             for (i in 0 until STRANDS) {
                 val tilt = TILTS[i]
                 val wobble = WOBBLES[i]
                 val lobes = LOBES[i]
-                val twist = i * 0.9f
+
+                // Lehar khud sarakti hai, aur har lakeer alag raftaar se.
+                val twist = i * 0.9f + phase * DRIFTS[i]
+
+                // Gend bhi ghoomti hai; har lakeer thodi si alag chaal me,
+                // warna sab ek saath ghoomti hui jaali jaisi lagti hai.
+                val spin = phase * SPEEDS[i]
+                val spinCos = cos(spin)
+                val spinSin = sin(spin)
 
                 val tiltCos = cos(tilt)
                 val tiltSin = sin(tilt)
@@ -915,8 +972,6 @@ class BubbleService : Service() {
                     val t = s.toFloat() / SEGMENTS
                     val angle = t * TWO_PI
 
-                    // Chakkar ko upar-neeche lehra dete hain - isse lakeer
-                    // seedhi jaali jaisi nahi, behti hui lagti hai.
                     val lift = wobble * sin(angle * lobes + twist)
                     val liftCos = cos(lift)
 
@@ -928,7 +983,7 @@ class BubbleService : Service() {
                     val y1 = y0 * tiltCos - z0 * tiltSin
                     val z1 = y0 * tiltSin + z0 * tiltCos
 
-                    // Poori gend ka ghoomna.
+                    // Ghoomna.
                     val x2 = x0 * spinCos + z1 * spinSin
                     val z2 = -x0 * spinSin + z1 * spinCos
 
@@ -940,13 +995,13 @@ class BubbleService : Service() {
                         val depth = (((z2 + prevZ) / 2f) + 1f) / 2f
                         val bright = depth * depth
 
+                        if (bright > 0.55f) {
+                            halo.alpha = ((bright - 0.55f) * 150f).toInt().coerceIn(0, 60)
+                            canvas.drawLine(prevX, prevY, sx, sy, halo)
+                        }
+
                         strand.alpha = (25f + 225f * bright).toInt().coerceIn(18, 255)
                         canvas.drawLine(prevX, prevY, sx, sy, strand)
-
-                        if (bright > 0.55f) {
-                            haze.alpha = ((bright - 0.55f) * 200f).toInt().coerceIn(0, 90)
-                            canvas.drawLine(prevX, prevY, sx, sy, haze)
-                        }
                     }
 
                     prevX = sx
@@ -955,10 +1010,12 @@ class BubbleService : Service() {
                 }
             }
 
-            phase += SPIN_STEP
-            // 60 fps ki zaroorat nahi - 30 pe bhi utna hi smooth lagta hai aur
-            // battery aadhi lagti hai.
-            postInvalidateDelayed(FRAME_MS)
+            if (spinning) {
+                phase += SPIN_STEP
+                // 60 fps ki zaroorat nahi - 30 pe bhi utna hi smooth lagta hai
+                // aur baaki apps ko CPU mil jata hai.
+                postInvalidateDelayed(FRAME_MS)
+            }
         }
 
         private companion object {
@@ -966,15 +1023,19 @@ class BubbleService : Service() {
             const val GREEN_SOFT = 0x5500E676
             const val GREEN_FADE = 0x1E00E676
             const val STRANDS = 6
-            const val SEGMENTS = 36
+            const val SEGMENTS = 30
             const val SPIN_STEP = 0.022f
             const val FRAME_MS = 33L
             const val TWO_PI = 6.2831855f
 
-            /** Har lakeer ka jhukav, lehar ki gehrai aur lehron ki ginti. */
+            /** Jhukav, lehar ki gehrai, lehron ki ginti. */
             val TILTS = floatArrayOf(0.15f, 0.62f, 1.12f, 1.62f, 2.15f, 2.65f)
             val WOBBLES = floatArrayOf(0.55f, 0.38f, 0.62f, 0.30f, 0.48f, 0.66f)
             val LOBES = floatArrayOf(2f, 3f, 2f, 4f, 3f, 2f)
+
+            /** Ghoomne ki aur lehar sarakne ki apni apni raftaar. */
+            val SPEEDS = floatArrayOf(1f, 0.82f, 1.18f, 0.9f, 1.32f, 0.72f)
+            val DRIFTS = floatArrayOf(0.9f, -1.3f, 1.6f, -0.8f, 1.1f, -1.5f)
         }
     }
 
@@ -987,6 +1048,13 @@ class BubbleService : Service() {
         const val SNAP_MS = 180L
         const val IDLE_MS = 4000L
         const val IDLE_ALPHA = 0.45f
+
+        /** Bar itni der bekaar khadi rahe to khud band. */
+        const val PANEL_IDLE_MS = 35_000L
+
+        /** Hands-free ke mic chhodne ka intezaar. */
+        const val MIC_HANDOVER_MS = 450L
+
         const val NOTIFICATION_ID = 4201
         const val CHANNEL_ID = "ev_bubble"
         const val PREFS = "ev_bubble"

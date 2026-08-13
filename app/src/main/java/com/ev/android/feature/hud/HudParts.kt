@@ -102,16 +102,20 @@ fun HudHeader(
             )
         }
 
+        // Gear ab tabs jaisa hi dikhta hai \u2014 wahi 14dp corner, wahi border,
+        // wahi hara rang. Pehle ye akela sletee gol button tha aur baaki screen
+        // se alag hi lagta tha.
         Box(
             modifier = Modifier
                 .padding(start = 12.dp)
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(EvSurfaceHigh)
+                .size(48.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(EvGreen.copy(alpha = 0.10f))
+                .border(BorderStroke(1.5.dp, EvGreen), RoundedCornerShape(14.dp))
                 .clickable(onClick = onSettings),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = "\u2699", color = EvTextMuted, fontSize = 20.sp)
+            Text(text = "\u2699", color = EvGreen, fontSize = 22.sp)
         }
     }
 }
@@ -249,7 +253,7 @@ fun HudActionBar(
     ) {
         CircleAction(icon = HudIcon.CAMERA, tint = EvGreen, onClick = onCamera)
 
-        // Pehle ye tabhi laal hota tha jab kuch chal raha ho, warna sletee —
+        // Pehle ye tabhi laal hota tha jab kuch chal raha ho, warna sletee \u2014
         // design me hamesha laal hai, aur stop dabana kabhi nuksaan nahi karta.
         CircleAction(icon = HudIcon.CLOSE, tint = EvRed, onClick = onStop)
 
@@ -366,7 +370,7 @@ private fun CircleAction(
     }
 }
 
-/** HUD style tile — apps, tools sab isi me dikhte hain. */
+/** HUD style tile \u2014 apps, tools sab isi me dikhte hain. */
 @Composable
 fun HudTile(
     label: String,
@@ -406,7 +410,7 @@ fun HudTile(
     }
 }
 
-/** Chhota sa section ka naam — "// APPS" jaisa terminal look. */
+/** Chhota sa section ka naam \u2014 "// APPS" jaisa terminal look. */
 @Composable
 fun HudSectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
