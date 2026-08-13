@@ -27,6 +27,7 @@ import com.ev.android.feature.media.YouTubeResolver
 import com.ev.android.feature.messaging.SmsSender
 import com.ev.android.feature.notes.Notes
 import com.ev.android.feature.reminders.Reminders
+import com.ev.android.feature.screen.ScreenTools
 import com.ev.android.feature.settings.EvSettings
 import com.ev.android.feature.weather.EvWeather
 import kotlinx.coroutines.delay
@@ -130,6 +131,12 @@ object CommandExecutor {
             }
 
         is EvCommand.TypeText -> typeText(context, command)
+
+        is EvCommand.Screen -> {
+            val result = ScreenTools.run(context, command.action)
+            if (result.ok) CommandResult.Success(result.message)
+            else CommandResult.Failure(result.message)
+        }
 
         is EvCommand.Multi -> runMulti(context, command.commands)
 

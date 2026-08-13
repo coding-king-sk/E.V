@@ -125,6 +125,7 @@ object CommandHistory {
         is EvCommand.TypeText ->
             "Type \"" + command.text + "\"" +
                 (command.target?.let { " (" + it.label + ")" } ?: "")
+        is EvCommand.Screen -> "Screen: " + command.action.name
         is EvCommand.Multi ->
             command.commands.joinToString(" + ") { describe(it) }
         is EvCommand.Device -> "Device: " + command.action.name
