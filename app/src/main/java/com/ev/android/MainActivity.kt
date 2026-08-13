@@ -3,6 +3,7 @@ package com.ev.android
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,6 +37,24 @@ class MainActivity : ComponentActivity() {
         if (missing.isNotEmpty()) {
             permissionLauncher.launch(missing.toTypedArray())
         }
+
+        // Back dabane pe app band nahi hoti, bas peeche chali jati hai.
+        //
+        // E.V assistant hai, ek baar ka kaam nahi. Poori app band kar dene se
+        // hands-free listener aur chalu kaam sab mar jate the aur agli baar
+        // sab dobara shuru hota tha. Ab wahi hota hai jo home dabane pe hota
+        // hai \u2014 app zinda, bas peeche.
+        //
+        // Compose ke andar khule panel apna back khud lete hain (BackHandler),
+        // isliye ye callback tabhi chalta hai jab wahan koi panel khula na ho.
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    moveTaskToBack(true)
+                }
+            },
+        )
 
         // Floating bubble se aaye ho to seedha kaam pe lag jao \u2014 mic khol do
         // ya jo command bheji hai wo chala do.
