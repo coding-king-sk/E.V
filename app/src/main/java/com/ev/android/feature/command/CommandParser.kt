@@ -6,6 +6,7 @@ import com.ev.android.feature.info.Calculator
 import com.ev.android.feature.info.InfoKind
 import com.ev.android.feature.launcher.AppCatalog
 import com.ev.android.feature.media.MediaAction
+import com.ev.android.feature.screen.ScreenAction
 
 private enum class Verb { PLAY, OPEN, SEARCH }
 
@@ -26,6 +27,7 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "1500 ka 18% kitna hota hai"           -> Calculate
  *  "google pe sachin search karo"         -> WebSearch("sachin")
  *  "photo lo"                             -> TakePhoto(front = false)
+ *  "screen pe kya likha hai"              -> Screen(READ)
  *  "volume 60% karo"                      -> Device(VOLUME_SET, 60)
  *  "torch on karo aur whatsapp kholo"     -> Multi([Device, OpenApp])
  *
@@ -110,6 +112,44 @@ object CommandParser {
         "location kahan", "main kahan hoon", "main kaha hu", "mai kahan hu",
         "kahan hoon main", "kahan hu", "kaha hu", "kahan par hoon",
         "mera address", "mera pata", "current location", "where am i",
+    )
+
+    /**
+     * Screen padhne ke phrases.
+     *
+     * Yahan har phrase me "screen" ya "isme/yahan" hai — akela "kya likha hai"
+     * rakhna khatarnak hota, wo aam baat-cheet me bhi aata hai.
+     */
+    private val screenReadWords = listOf(
+        "screen padho", "screen padh do", "screen padh ke batao", "screen padhkar batao",
+        "screen read karo", "read screen", "screen batao", "screen samjhao",
+        "screen samjha do", "screen me kya likha hai", "screen mein kya likha hai",
+        "screen pe kya likha hai", "screen par kya likha hai", "screen pe kya hai",
+        "screen par kya hai", "screen me kya hai", "screen pe kya chal raha hai",
+        "ye screen kya hai", "isme kya likha hai", "ismein kya likha hai",
+        "yahan kya likha hai", "what is on screen", "read the screen",
+    )
+
+    /** "screen translate karo", "ise translate karo" */
+    private val screenTranslateWords = listOf(
+        "screen translate karo", "screen translate", "screen ka translate",
+        "screen ka translation", "screen ko translate karo", "translate screen",
+        "ise translate karo", "isko translate karo", "ye translate karo",
+        "translate kar do", "translate karo", "hinglish me translate",
+        "hindi me translate", "iska matlab batao",
+    )
+
+    /**
+     * "screenshot lekar bhejo".
+     *
+     * Sirf screenshot lena device ka kaam hai (wahi purana DeviceAction),
+     * isliye yahan wahi phrases hain jinme bhejna bhi shamil hai.
+     */
+    private val screenShareShotWords = listOf(
+        "screenshot bhejo", "screenshot bhej do", "screenshot lekar bhejo",
+        "screenshot le kar bhejo", "screenshot leke bhejo", "screenshot share karo",
+        "screenshot share", "screenshot send karo", "screen shot bhejo",
+        "screenshot le kar send karo",
     )
 
     /**
@@ -399,6 +439,13 @@ object CommandParser {
     ): EvCommand {
         if (normalized.isEmpty()) return EvCommand.Unknown(raw)
 
+        // "screen pe kya likha hai", "screenshot lekar bhejo"
+        //
+        // Sabse pehle — warna "screen pe kya hai" me "kya" dekh ke Info wali
+        // branch, aur "screenshot bhejo" me "bhejo" dekh ke message wali branch
+        // ise le udti.
+        parseScreen(normalized)?.let { return it }
+
         // Device toggles pehle — "torch on karo" ko app-launcher parse na kar de.
         parseDevice(normalized)?.let { return it }
 
@@ -491,6 +538,30 @@ object CommandParser {
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
         }
+    }
+
+    // --------------------------------------------------------------- screen
+
+    /**
+     * Screen wale kaam.
+     *
+     * Bhejne wala screenshot pehle dekhte hain, warna "screenshot bhejo" sirf
+     * screenshot le kar ruk jata.
+     */
+    private fun parseScreen(text: String): EvCommand? {
+        if (screenShareShotWords.any { containsWord(text, it) }) {
+            return EvCommand.Screen(ScreenAction.SHARE_SHOT)
+        }
+
+        if (screenTranslateWords.any { containsWord(text, it) }) {
+            return EvCommand.Screen(ScreenAction.TRANSLATE)
+        }
+
+        if (screenReadWords.any { containsWord(text, it) }) {
+            return EvCommand.Screen(ScreenAction.READ)
+        }
+
+        return null
     }
 
     // ----------------------------------------------------------------- note
