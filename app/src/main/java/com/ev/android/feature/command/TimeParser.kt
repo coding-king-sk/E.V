@@ -7,12 +7,12 @@ import java.util.TimeZone
  * Hinglish me time nikalne wale chhote helpers.
  *
  * Log "5 minute" bhi bolte hain aur "paanch minute" bhi, isliye digits aur
- * Hindi ginti dono handle karte hain. Spelling ki bhi koi ginti nahi \u2014
+ * Hindi ginti dono handle karte hain. Spelling ki bhi koi ginti nahi —
  * Google ka recognizer "minute" ko "minut" ya "mint" bhi likh deta hai.
  */
 internal object TimeParser {
 
-    /** Timer ki upper limit \u2014 24 ghante se zyada ka timer galti hi hoti hai. */
+    /** Timer ki upper limit — 24 ghante se zyada ka timer galti hi hoti hai. */
     private const val MAX_DURATION_SECONDS = 24 * 3600
 
     private val numberWords = mapOf(
@@ -33,9 +33,18 @@ internal object TimeParser {
         "hour", "hours", "hr", "hrs", "ghanta", "ghante", "ghanto",
     )
 
+    /**
+     * Shabdon ke beech ka koi bhi nishan (space, comma, full stop) todne wala
+     * maana jata hai.
+     *
+     * Pehle sirf space par tokens toote the, isliye "5 minute, yaad dilana" me
+     * unit "minute," ban jati thi aur kisi list se match hi nahi hoti thi.
+     */
+    private val tokenSplitter = Regex("[^\\p{L}\\p{N}]+")
+
     /** "5 minute", "paanch minute", "30 second" -> seconds. */
     fun durationSeconds(text: String): Int? {
-        val tokens = text.split(" ").filter { it.isNotBlank() }
+        val tokens = text.split(tokenSplitter).filter { it.isNotBlank() }
 
         for (index in tokens.indices) {
             val unit = tokens[index]
@@ -75,17 +84,23 @@ internal object TimeParser {
         } else {
             val single = Regex("(^|\\s)(\\d{1,2})(\\s|$)").find(text)
             hour = single?.groupValues?.get(2)?.toIntOrNull()
-                ?: text.split(" ").firstNotNullOfOrNull { numberWords[it] }
+                ?: text.split(tokenSplitter).firstNotNullOfOrNull { numberWords[it] }
                 ?: return null
             minute = 0
         }
 
         if (hour !in 0..23 || minute !in 0..59) return null
 
-        val morning = text.contains("subah") || text.contains("am") || text.contains("morning")
-        val night = text.contains("raat") || text.contains("night")
-        val evening = night || text.contains("shaam") || text.contains("sham") ||
-            text.contains("pm") || text.contains("dopahar") || text.contains("evening")
+        // Yahan poore shabd hi dekhne hain. Pehle seedha contains() tha, aur
+        // "am" to Hinglish me har doosre shabd me chhupa hota hai — "kaam",
+        // "naam", "shaam", "salaam". Isi wajah se "12 baje kaam yaad dilana"
+        // subah maana jata tha aur reminder aadhi raat 00:00 pe set hota tha.
+        val morning = containsWord(text, "subah") || containsWord(text, "am") ||
+            containsWord(text, "morning")
+        val night = containsWord(text, "raat") || containsWord(text, "night")
+        val evening = night || containsWord(text, "shaam") || containsWord(text, "sham") ||
+            containsWord(text, "pm") || containsWord(text, "dopahar") ||
+            containsWord(text, "evening")
 
         if (evening && hour in 1..11) hour += 12
         if (morning && hour == 12) hour = 0
@@ -103,7 +118,7 @@ internal object TimeParser {
      *  - "kal subah 8 baje yaad dilana"      -> agle din 08:00
      *
      * Agar sirf time bola ho ("shaam 7 baje") aur wo waqt aaj nikal chuka ho,
-     * to agle din maan lete hain \u2014 warna reminder turant bajta, jo bekaar hai.
+     * to agle din maan lete hain — warna reminder turant bajta, jo bekaar hai.
      *
      * @param now testing ke liye inject kiya ja sakta hai
      */
@@ -144,8 +159,17 @@ internal object TimeParser {
         return durationSeconds(text)
     }
 
+    /**
+     * Poora shabd match — aage-peeche koi doosra akshar nahi hona chahiye.
+     *
+     * Boundary sirf akshar dekhti hai, space nahi, isliye "subah-subah" aur
+     * "7am" jaise dono roop pakde jaate hain.
+     */
     private fun containsWord(text: String, word: String): Boolean =
-        Regex("(^|\\s)" + Regex.escape(word) + "($|\\s)").containsMatchIn(text)
+        Regex(
+            "(?<![\\p{L}\\p{M}])" + Regex.escape(word) + "(?![\\p{L}\\p{M}])",
+            RegexOption.IGNORE_CASE,
+        ).containsMatchIn(text)
 
     private fun valueOf(token: String): Int? =
         token.toIntOrNull() ?: numberWords[token]
