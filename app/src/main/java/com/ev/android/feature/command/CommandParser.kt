@@ -788,9 +788,19 @@ object CommandParser {
      * App ka naam aage se nikalta hai, aur likhne wala text verb ke baad se.
      * Agar text verb ke pehle bola gaya ho ("hello bhai type karo") to wo bhi
      * chalta hai.
+     *
+     * "likho" teen jagah chalta hai — typing, message aur note. Isliye jab
+     * verb "type" wala na ho, to message ("rehan ko likho ki…") aur note
+     * ("note likho…") wale vaakya yahan se chhod dete hain; unke apne parser
+     * aage hain aur pehle ye branch unhe kha jati thi.
      */
     private fun parseType(text: String, installedApps: List<InstalledApp>): EvCommand? {
         val verb = matchPhrase(text, typeVerbs) ?: return null
+
+        if (!verb.startsWith("type")) {
+            if (koRegex.containsMatchIn(text)) return null
+            if (matchPhrase(text, noteVerbs) != null) return null
+        }
 
         var work = text
         var target: AppTarget? = null
