@@ -24,8 +24,10 @@ import android.view.accessibility.AccessibilityNodeInfo
  * Arm kiye bina ye service kuch nahi karti, aur arm hone ke baad bhi sirf 20-25
  * second ki window rehti hai. Kaam hote hi khud ko disarm kar leti hai.
  *
- * Iske alawa ye screen ko **padh** bhi sakti hai ([screenText]) aur screen ko
- * upar-neeche [scroll] bhi kar sakti hai.
+ * Iske alawa ye screen ko **padh** bhi sakti hai ([screenText]), screen ko
+ * upar-neeche [scroll] kar sakti hai, aur ye bhi bata deti hai ki abhi
+ * saamne kaun si app khuli hai ([foregroundPackage]) - bubble usi hisaab se
+ * apne quick action buttons badalta hai.
  */
 class EvAccessibilityService : AccessibilityService() {
 
@@ -42,6 +44,20 @@ class EvAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Sabse pehle sirf itna note kar lete hain ki kaun si app saamne hai.
+        // Ye sasta kaam hai aur har event pe hota hai, isliye armed check se
+        // pehle - warna bubble ko kabhi pata hi nahi chalta ki user Instagram
+        // me hai ya YouTube me.
+        if (
+            event != null &&
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        ) {
+            val current = event.packageName?.toString()
+            if (!current.isNullOrBlank() && current != getPackageName()) {
+                lastPackage = current
+            }
+        }
+
         val typingArmed = isTypingArmed()
         val sendArmed = isSendArmed()
         if (!typingArmed && !sendArmed) return
@@ -222,8 +238,18 @@ class EvAccessibilityService : AccessibilityService() {
         @Volatile
         private var pendingText: String? = null
 
+        @Volatile
+        private var lastPackage: String? = null
+
         /** True jab service actually chal rahi ho. */
         fun isRunning(): Boolean = instance != null
+
+        /**
+         * Abhi saamne kaun si app khuli hai.
+         *
+         * @return null agar service off hai ya abhi tak koi app ka event nahi aaya
+         */
+        fun foregroundPackage(): String? = lastPackage
 
         private fun isSendArmed(): Boolean = SystemClock.elapsedRealtime() < autoSendDeadline
 
