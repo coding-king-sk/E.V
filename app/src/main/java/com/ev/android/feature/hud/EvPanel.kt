@@ -1,5 +1,6 @@
 package com.ev.android.feature.hud
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,10 @@ import com.ev.android.ui.theme.EvOutline
  *
  * Dialog jaan boojh ke nahi use kiya: dialog ke kinaare, chhaya aur apna
  * background app ke flat black look se match nahi karte.
+ *
+ * Phone ka back button bhi yahi karta hai jo arrow karta hai \u2014 page band,
+ * app khuli. Pehle back seedha app se bahar nikal deta tha, jo galat lagta
+ * tha: Settings khol ke back dabana sabse aam aadat hai.
  */
 @Composable
 fun EvPanel(
@@ -43,6 +48,11 @@ fun EvPanel(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // Panel khula ho to back sabse pehle yahan aata hai; MainActivity wala
+    // callback (jo app ko peeche bhejta hai) tabhi chalta hai jab koi panel
+    // khula na ho.
+    BackHandler(onBack = onClose)
+
     Column(
         modifier = modifier
             .fillMaxSize()
