@@ -41,9 +41,11 @@ import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.ev.android.MainActivity
+import com.ev.android.feature.accessibility.EvAccessibilityService
 import com.ev.android.feature.ai.AiCommandResolver
 import com.ev.android.feature.ai.AiOutcome
 import com.ev.android.feature.ai.Conversation
@@ -122,6 +124,14 @@ object Bubble {
  * jo bubble ka poora maqsad hi khatam kar deti thi. Ab parser, AI aur
  * executor sab yahin service me chalte hain; jawab bar me dikhta hai aur
  * sunai deta hai, aap jis app me the wahin rehte ho.
+ *
+ * Bar me do cheezein aur hain:
+ *
+ *  - **Live wave**: bolte waqt orb ki lakeeren aawaz ke saath phoolti-sikudti
+ *    hain, isliye pata chalta hai ki mic sach me sun raha hai.
+ *  - **Quick actions**: jis app me aap ho, usi ke hisaab se do-teen chhote
+ *    buttons - Reels me upar/neeche, chat me "screen padho", waghairah. Bolna
+ *    bhi na pade, ek tap me kaam ho jaye.
  *
  * Do cheezein yahan jaan-boojh ke bar ko hatati hain:
  *
@@ -502,6 +512,9 @@ class BubbleService : Service() {
      * Design app ki HUD jaisa hai - kaala card, hari dhaar, aur andar wahi
      * gol buttons jo home screen pe hain. Kinare pe ek chalti hui hari roshni
      * ghoomti rehti hai, jisse pata chalta hai ki E.V zinda hai.
+     *
+     * Bar ke upar quick action ki ek line hoti hai, jo us app ke hisaab se
+     * badalti hai jisme aap ho.
      */
     private fun showPanel() {
         val manager = windowManager ?: return
@@ -554,6 +567,13 @@ class BubbleService : Service() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(12), dp(12), dp(12))
             isFocusableInTouchMode = true
+            addView(
+                quickActions(),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(8) },
+            )
             addView(
                 row,
                 LinearLayout.LayoutParams(
@@ -610,6 +630,115 @@ class BubbleService : Service() {
             startBarMic()
         }
     }
+
+    // ------------------------------------------------------ quick actions
+
+    /**
+     * Bar ke upar wali chhoti buttons ki line.
+     *
+     * Har app me aadmi wahi do-teen kaam karta hai: Reels me upar-neeche, chat
+     * me "kya likha hai", browser me "screenshot bhejo". Bolna har baar zaroori
+     * nahi hona chahiye - ek tap kaafi hai.
+     *
+     * Kaun si app saamne hai ye Accessibility service batati hai. Wo off ho to
+     * ye line general buttons dikha deti hai (jhooth nahi bolti, bas kaam ke
+     * default de deti hai).
+     */
+    private fun quickActions(): View {
+        val strip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        quickActionsFor(EvAccessibilityService.foregroundPackage()).forEach { action ->
+            strip.addView(quickChip(action.first, action.second))
+            strip.addView(gap())
+        }
+
+        return HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(
+                strip,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Us app ke hisaab se buttons.
+     *
+     * Pehla hissa label hai (chhota, uppercase), doosra wahi command jo bolne
+     * pe chalti hai - isliye koi naya raasta nahi banana pada, tap bhi usi
+     * parser se hoke guzarta hai jisse aawaz guzarti hai.
+     */
+    private fun quickActionsFor(packageName: String?): List<Pair<String, String>> {
+        val reels = listOf(
+            "NEECHE" to "scroll down",
+            "UPAR" to "scroll up",
+            "SCREEN PADHO" to "screen pe kya likha hai",
+            "SHOT BHEJO" to "screenshot bhejo",
+        )
+
+        val chat = listOf(
+            "SCREEN PADHO" to "screen pe kya likha hai",
+            "TRANSLATE" to "screen translate karo",
+            "SHOT BHEJO" to "screenshot bhejo",
+            "NEECHE" to "scroll down",
+        )
+
+        return when (packageName) {
+            "com.instagram.android",
+            "com.google.android.youtube",
+            "com.zhiliaoapp.musically",
+            "in.mohalla.sharechat",
+            "com.facebook.katana",
+            -> reels
+
+            "com.whatsapp",
+            "com.whatsapp.w4b",
+            "org.telegram.messenger",
+            "com.google.android.gm",
+            -> chat
+
+            null -> listOf(
+                "SCREEN PADHO" to "screen pe kya likha hai",
+                "SHOT BHEJO" to "screenshot bhejo",
+                "NEECHE" to "scroll down",
+                "UPAR" to "scroll up",
+            )
+
+            else -> listOf(
+                "SCREEN PADHO" to "screen pe kya likha hai",
+                "NEECHE" to "scroll down",
+                "UPAR" to "scroll up",
+                "TRANSLATE" to "screen translate karo",
+            )
+        }
+    }
+
+    private fun quickChip(label: String, command: String): View =
+        TextView(this).apply {
+            text = label
+            setTextColor(GREEN)
+            textSize = 10f
+            letterSpacing = 0.12f
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(16).toFloat()
+                setColor(SURFACE)
+                setStroke(dp(1), OUTLINE)
+            }
+            setOnClickListener {
+                keepPanelAlive()
+                runInBar(command)
+            }
+        }
 
     /** Jab bhi user kuch kare, band hone ki ginti dobara shuru. */
     private fun keepPanelAlive() {
@@ -775,21 +904,37 @@ class BubbleService : Service() {
             override fun onReadyForSpeech(params: Bundle?) {
                 keepPanelAlive()
                 setBarHint("SUN RAHA HOON\u2026")
+                // Sunte waqt orb poora saaf aur zinda - lakeeren aawaz ke
+                // saath lehrayengi.
+                wakeUp()
+                orb?.setListening(true)
             }
 
             override fun onBeginningOfSpeech() {
                 keepPanelAlive()
             }
 
-            override fun onRmsChanged(rmsdB: Float) = Unit
+            /**
+             * Yahi wo live wave hai.
+             *
+             * rmsdB lagbhag -2 se 10 tak aata hai. Ise 0..1 me daal kar orb ko
+             * de dete hain; orb usse apni lakeeron ki gehrai badha deta hai,
+             * isliye zor se bolo to gola zyada lehrata hai.
+             */
+            override fun onRmsChanged(rmsdB: Float) {
+                orb?.setLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
+            }
+
             override fun onBufferReceived(buffer: ByteArray?) = Unit
 
             override fun onEndOfSpeech() {
                 setBarHint("SOCH RAHA HOON\u2026")
+                orb?.setListening(false)
             }
 
             override fun onError(error: Int) {
                 releaseRecognizer()
+                orb?.setListening(false)
                 when (error) {
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
                     SpeechRecognizer.ERROR_CLIENT,
@@ -801,6 +946,7 @@ class BubbleService : Service() {
 
             override fun onResults(results: Bundle?) {
                 releaseRecognizer()
+                orb?.setListening(false)
                 val heard = results
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
@@ -853,6 +999,7 @@ class BubbleService : Service() {
     }
 
     private fun stopBarMic() {
+        orb?.setListening(false)
         val speech = recognizer ?: return
         recognizer = null
         runCatching {
@@ -1121,6 +1268,10 @@ class BubbleService : Service() {
      * Idle hone pe ghoomna rukta nahi, sirf dheema ho jata hai - halka sa
      * hilta hua orb zinda lagta hai, aur aadhe frames me CPU bhi bach jata
      * hai.
+     *
+     * **Live wave**: jab mic sun raha ho, [setLevel] se aawaz ka zor aata hai
+     * aur lakeeron ki lehar utni gehri ho jati hai. Level apne aap dheere
+     * dheere neeche aata hai, warna ek zor ki aawaz pe orb wahin atak jata.
      */
     private class OrbView(context: Context) : View(context) {
 
@@ -1141,6 +1292,10 @@ class BubbleService : Service() {
         private var pressed = false
         private var idle = false
 
+        /** 0 = chup, 1 = zor se bol rahe ho. */
+        private var level = 0f
+        private var listening = false
+
         fun setPressedLook(value: Boolean) {
             pressed = value
             invalidate()
@@ -1153,6 +1308,22 @@ class BubbleService : Service() {
             invalidate()
         }
 
+        /** Mic chalu hai ya nahi - chalu me lakeeren zyada chamakti hain. */
+        fun setListening(value: Boolean) {
+            if (listening == value) return
+            listening = value
+            if (!value) level = 0f
+            invalidate()
+        }
+
+        /** Aawaz ka zor - 0 se 1. Sirf sunte waqt aata hai. */
+        fun setLevel(value: Float) {
+            // Sabse tez wala jhatka rakh lete hain; utarna neeche onDraw me
+            // dheere dheere hota hai, isliye lehar jhatke se nahi girti.
+            if (value > level) level = value.coerceIn(0f, 1f)
+            invalidate()
+        }
+
         override fun onDraw(canvas: Canvas) {
             val w = width.toFloat()
             val h = height.toFloat()
@@ -1161,7 +1332,10 @@ class BubbleService : Service() {
             val cx = w / 2f
             val cy = h / 2f
             val outer = min(w, h) / 2f
-            val radius = outer * (if (pressed) 0.72f else 0.78f)
+
+            // Bolte waqt gola thoda saans leta hai.
+            val breathe = if (listening) 1f + level * 0.06f else 1f
+            val radius = outer * (if (pressed) 0.72f else 0.78f) * breathe
 
             glow.shader = RadialGradient(
                 cx,
@@ -1179,9 +1353,12 @@ class BubbleService : Service() {
             strand.strokeWidth = outer * 0.045f
             halo.strokeWidth = outer * 0.115f
 
+            // Yahi live wave hai: aawaz ke zor se lehar gehri ho jati hai.
+            val amp = if (listening) 1f + level * 1.2f else 1f
+
             for (i in 0 until STRANDS) {
                 val tilt = TILTS[i]
-                val wobble = WOBBLES[i]
+                val wobble = WOBBLES[i] * amp
                 val lobes = LOBES[i]
 
                 // Lehar khud sarakti hai, aur har lakeer alag raftaar se.
@@ -1242,8 +1419,17 @@ class BubbleService : Service() {
                 }
             }
 
-            phase += if (idle) SPIN_STEP * 0.5f else SPIN_STEP
-            postInvalidateDelayed(if (idle) IDLE_FRAME_MS else FRAME_MS)
+            // Sunte waqt poori raftaar - dheemi chaal me wave saaf nahi dikhti.
+            val slow = idle && !listening
+            phase += if (slow) SPIN_STEP * 0.5f else SPIN_STEP
+
+            // Aawaz ka zor dheere dheere utarta hai.
+            if (level > 0f) {
+                level *= LEVEL_DECAY
+                if (level < 0.02f) level = 0f
+            }
+
+            postInvalidateDelayed(if (slow) IDLE_FRAME_MS else FRAME_MS)
         }
 
         private companion object {
@@ -1256,6 +1442,9 @@ class BubbleService : Service() {
             const val FRAME_MS = 33L
             const val IDLE_FRAME_MS = 66L
             const val TWO_PI = 6.2831855f
+
+            /** Har frame me itna hissa bacha rehta hai - lehar narmi se girti hai. */
+            const val LEVEL_DECAY = 0.88f
 
             /** Jhukav, lehar ki gehrai, lehron ki ginti. */
             val TILTS = floatArrayOf(0.15f, 0.62f, 1.12f, 1.62f, 2.15f, 2.65f)
@@ -1298,5 +1487,6 @@ class BubbleService : Service() {
         const val OUTLINE = 0xFF1E241F.toInt()
         const val TEXT_PRIMARY = 0xFFF2F5F2.toInt()
         const val TEXT_MUTED = 0xFF7C857D.toInt()
+        const val GREEN = 0xFF00E676.toInt()
     }
 }
