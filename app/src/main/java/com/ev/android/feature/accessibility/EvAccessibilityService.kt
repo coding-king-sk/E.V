@@ -3,6 +3,7 @@ package com.ev.android.feature.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
@@ -15,19 +16,21 @@ import android.view.accessibility.AccessibilityNodeInfo
  * jaan-boojh ke block hai. Sirf ek AccessibilityService hi screen ka button
  * actually tap kar sakti hai ya text box me likh sakti hai.
  *
- * Do kaam karti hai, aur dono "armed" hone par hi:
+ * Teen kaam karti hai:
  *
  *  1. [armWhatsAppAutoSend] - WhatsApp ka Send button daba deti hai.
  *  2. [armTyping] - jo bhi text box screen pe focus me hai, usme likh deti hai
  *     ("instagram pe type karo hello").
+ *  3. [typePromptAndSubmit] - browser me khule Gemini/ChatGPT ke box me sawaal
+ *     likh ke Submit daba deti hai. Yahi "bina API key wale jawab" ki jad hai.
  *
- * Arm kiye bina ye service kuch nahi karti, aur arm hone ke baad bhi sirf 20-25
- * second ki window rehti hai. Kaam hote hi khud ko disarm kar leti hai.
+ * Pehle do kaam "armed" hone par hi hote hain aur 20-25 second ki window ke
+ * andar. Teesra kaam [WebLlmBridge] khud step-by-step chalata hai, isliye wo
+ * arming ke bharose nahi hai - browser me event kabhi kabhi aate hi nahi.
  *
  * Iske alawa ye screen ko **padh** bhi sakti hai ([screenText]), screen ko
  * upar-neeche [scroll] kar sakti hai, aur ye bhi bata deti hai ki abhi
- * saamne kaun si app khuli hai ([foregroundPackage]) - bubble usi hisaab se
- * apne quick action buttons badalta hai.
+ * saamne kaun si app khuli hai ([foregroundPackage]).
  */
 class EvAccessibilityService : AccessibilityService() {
 
@@ -98,15 +101,7 @@ class EvAccessibilityService : AccessibilityService() {
      * text wahin gir jata tha - user ki app me kuch nahi likha jata tha.
      */
     private fun typeInto(root: AccessibilityNodeInfo, text: String): Boolean {
-        val focused = runCatching {
-            root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        }.getOrNull()
-
-        val target = focused?.takeIf { it.isEditable && !isOurs(it) }
-            ?: findEditable(root, 0)
-            ?: return false
-
-        if (isOurs(target)) return false
+        val target = inputBox(root) ?: return false
 
         // Box focus me na ho to pehle usme click karo, warna kuch apps text
         // set hone ke baad turant hata deti hain.
@@ -125,6 +120,19 @@ class EvAccessibilityService : AccessibilityService() {
         return runCatching {
             target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
         }.getOrDefault(false)
+    }
+
+    /** Screen pe likhne wala box - pehle focused, warna pehla editable. */
+    private fun inputBox(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val focused = runCatching {
+            root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        }.getOrNull()
+
+        val target = focused?.takeIf { it.isEditable && !isOurs(it) }
+            ?: findEditable(root, 0)
+            ?: return null
+
+        return target.takeIf { !isOurs(it) }
     }
 
     /** Ye node E.V ka apna hai? (bubble ki action bar) */
@@ -153,23 +161,35 @@ class EvAccessibilityService : AccessibilityService() {
         }
 
         // Agar WhatsApp ne id badal di ho to content-description se dhoondo.
-        findByDescription(root, 0)?.let { node ->
+        findByDescription(root, 0, SEND_LABELS)?.let { node ->
             if (clickSelfOrParent(node)) return true
         }
 
         return false
     }
 
-    private fun findByDescription(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+    /**
+     * Diye hue labels me se kisi se shuru hone wala button.
+     *
+     * Icon buttons me text nahi hota, unka matlab contentDescription me chhupa
+     * hota hai ("Send message", "Submit") - isliye wahi dekhte hain.
+     */
+    private fun findByDescription(
+        node: AccessibilityNodeInfo?,
+        depth: Int,
+        labels: List<String>,
+    ): AccessibilityNodeInfo? {
         if (node == null || depth > MAX_TREE_DEPTH) return null
 
         val description = node.contentDescription?.toString()?.lowercase()
-        if (description != null && SEND_LABELS.any { description.startsWith(it) }) {
+            ?: node.text?.toString()?.lowercase()
+
+        if (description != null && labels.any { description.startsWith(it) }) {
             return node
         }
 
         for (index in 0 until node.childCount) {
-            findByDescription(node.getChild(index), depth + 1)?.let { return it }
+            findByDescription(node.getChild(index), depth + 1, labels)?.let { return it }
         }
         return null
     }
@@ -226,6 +246,18 @@ class EvAccessibilityService : AccessibilityService() {
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
         private val SEND_LABELS = listOf("send", "bhej", "\u092D\u0947\u091C")
 
+        /**
+         * Gemini, ChatGPT aur baaki chat wali websites ka Submit button.
+         *
+         * Har site ka apna lafz hai, isliye list lambi hai. "stop" jaan boojh ke
+         * nahi hai - jawab likhte waqt wahi button Stop ban jata hai, aur use
+         * dabane se jawab beech me ruk jata.
+         */
+        private val SUBMIT_LABELS = listOf(
+            "send message", "send prompt", "submit prompt", "submit", "send",
+            "run", "ask", "go", "search",
+        )
+
         @Volatile
         private var instance: EvAccessibilityService? = null
 
@@ -274,6 +306,53 @@ class EvAccessibilityService : AccessibilityService() {
         fun cancelTyping() {
             pendingText = null
             typingDeadline = 0L
+        }
+
+        // ------------------------------------------------- browser automation
+
+        /**
+         * Browser me khule chat box me sawaal likho aur Submit dabao.
+         *
+         * Ye ek hi baar me poora kaam karne ki koshish **nahi** karta. Page ke
+         * load hone, box ke aane aur button ke enable hone me waqt lagta hai,
+         * isliye [WebLlmBridge] ise har 800ms me dobara bulata hai aur ye har
+         * baar bas agla chhota kadam uthata hai:
+         *
+         *  1. box mila? -> sawaal likh do
+         *  2. sawaal box me dikh raha hai? -> Submit dabao
+         *
+         * @return true tabhi jab prompt sach me bhej diya gaya ho
+         */
+        fun typePromptAndSubmit(text: String): Boolean {
+            val service = instance ?: return false
+            val root = runCatching { service.rootInActiveWindow }.getOrNull() ?: return false
+
+            val box = service.inputBox(root) ?: return false
+            val current = box.text?.toString().orEmpty()
+
+            // Box me sawaal abhi tak nahi pahuncha - pehle wahi kaam.
+            val head = text.take(24)
+            if (!current.contains(head, ignoreCase = true)) {
+                service.typeInto(root, text)
+                return false
+            }
+
+            // Sawaal box me hai - ab bhejna hai.
+            service.findByDescription(root, 0, SUBMIT_LABELS)?.let { node ->
+                if (service.clickSelfOrParent(node)) return true
+            }
+
+            // Button na mile to keyboard ka Enter hi sahi.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val entered = runCatching {
+                    box.performAction(
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id,
+                    )
+                }.getOrDefault(false)
+                if (entered) return true
+            }
+
+            return false
         }
 
         /** GLOBAL_ACTION_HOME / BACK / RECENTS / TAKE_SCREENSHOT / LOCK_SCREEN. */
