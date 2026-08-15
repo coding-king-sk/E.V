@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.ev.android.feature.ai.AiCommandResolver
 import com.ev.android.feature.ai.AiOutcome
+import com.ev.android.feature.ai.WebLlmBridge
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
@@ -319,18 +320,17 @@ fun LauncherScreen(
     }
 
     /**
-     * Hands-free ka switch \u2014 sirf haath se.
+     * Hands-free hamesha chalu.
      *
-     * Pehle ye app khulte hi apne aap chalu ho jata tha. Natija: har baar app
-     * kholte hi mic zinda, notification zinda, aur battery kharch \u2014 chahe
-     * user ko sirf history dekhni ho. Ab jab tak khud MIC na dabao, E.V
-     * sunta nahi.
+     * Pehle yahan ON/OFF ka switch tha aur wo default OFF rehta tha \u2014 natija
+     * ye ki "Hey E.V" kabhi kaam hi nahi karta tha, kyunki sunne wala service
+     * chal hi nahi raha hota tha. Ab koi switch nahi: app khulte hi mic zinda
+     * ho jata hai aur zinda rehta hai. Band karna ho to notification me "Band
+     * karo" hai \u2014 wahi ek jagah, aur wo Android ka niyam hai.
      */
-    fun toggleHandsFree() {
+    fun ensureHandsFree() {
         if (EvListeningService.isRunning) {
-            EvListeningService.stop(context)
-            handsFree = false
-            notify("Hands-free band")
+            handsFree = true
             return
         }
 
@@ -342,7 +342,11 @@ fun LauncherScreen(
 
         EvListeningService.start(context)
         handsFree = true
-        notify("Ab bas \"Hey " + EvSettings.wakeName(context) + "\" bolo")
+    }
+
+    // App khulte hi sunna shuru \u2014 bina kisi button ke.
+    LaunchedEffect(Unit) {
+        ensureHandsFree()
     }
 
     /** Mic button ke liye hands-free ko thoda der ke liye rok ke wapas chalu. */
@@ -365,9 +369,13 @@ fun LauncherScreen(
     }
 
     /**
-     * Teen seedhiyan: offline parser -> AI se command -> AI se seedha jawab.
+     * Teen seedhiyan: offline parser -> AI se command -> browser se jawab.
      *
-     * Beech me ek chauthi cheez bhi hai: agar baat **adhoori** lagti hai
+     * Aakhri seedhi ab kisi API key pe nahi tiki: [WebLlmBridge] Chrome me
+     * Gemini/ChatGPT khol ke sawaal likhta hai, Submit dabata hai, jawab screen
+     * se padh leta hai aur wapas yahin dikha deta hai.
+     *
+     * Beech me ek aur cheez bhi hai: agar baat **adhoori** lagti hai
      * ("message bhejo" par kisko nahi bataya), to E.V "samajh nahi aaya"
      * bolne ki jagah **sawaal** puchta hai aur agla jawab usi command me jod
      * deta hai.
@@ -420,20 +428,24 @@ fun LauncherScreen(
                 return@launch
             }
 
-            // Command nahi bana \u2014 shayad ye sawaal hai. Groq se jawab lo.
-            val reply = com.ev.android.feature.ai.Conversation.answer(context, text)
+            // Command nahi bana \u2014 matlab ye sawaal hai. Na key, na account:
+            // browser me jawab dhoondh ke wapas le aate hain. Chrome kuch second
+            // ke liye saamne aayega, phir khud wapas.
+            status = "BROWSER SE JAWAB LA RAHA HOON\u2026"
+
+            val reply = WebLlmBridge.ask(context, text)
             busy = false
 
             val message = reply
-                ?: (outcome as? AiOutcome.Failed)?.reason
-                ?: "Samajh nahi aaya. API KEY pe tap karke Groq key daal do to main sawaalon ke jawab bhi de sakta hoon."
+                ?: "Jawab nahi mil paya. Phone ki Settings \u2192 Accessibility me " +
+                "E.V on hona chahiye \u2014 usi se browser ka jawab padha jata hai."
 
             status = message.uppercase()
 
             CommandHistory.add(
                 context = context,
                 spoken = text,
-                understood = if (reply != null) "Sawaal (AI)" else "Samajh nahi aaya",
+                understood = if (reply != null) "Sawaal (browser se jawab)" else "Jawab nahi mila",
                 reply = message,
             )
 
@@ -582,7 +594,7 @@ fun LauncherScreen(
                         micOn = handsFree,
                         coreActive = true,
                         apiKeySet = apiKeySet,
-                        onMicClick = { toggleHandsFree() },
+                        onMicClick = { ensureHandsFree() },
                         onApiKeyClick = { showApiKey = true },
                     )
 
