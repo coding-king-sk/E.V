@@ -255,6 +255,45 @@ object CommandParser {
         "me", "mein", "main", "on", "in", "se", "ka", "ki", "ke",
     )
 
+    /**
+     * Ek hi matlab wale shabdon ki alag-alag spelling ek shakl me.
+     *
+     * Recognizer "pe" ko aksar "per" likh deta hai. Sirf [connectors] me rakhna
+     * kaafi nahi tha — poore parser ki phrase lists me "pe"/"par"/"me" likha
+     * hai, isliye "screen per kya likha hai" kisi list se match hi nahi hota
+     * tha aur command aakhir me app kholne wale hisse me chali jaati thi
+     * (jahan "screen" ko app ka naam samajh ke "Screen Lock" khul jaata tha).
+     *
+     * "main" yahan jaan-boojh ke nahi hai — wo "me" ka matlab bhi rakhta hai
+     * aur "main kahan hoon" ka bhi.
+     */
+    private val spellingFixes = mapOf(
+        "per" to "pe",
+        "pey" to "pe",
+        "peh" to "pe",
+        "pr" to "pe",
+        "skreen" to "screen",
+        "sreen" to "screen",
+    )
+
+    /**
+     * Wo aam shabd jo kisi app ka naam nahi hote.
+     *
+     * Phone me "Screen Lock", "Call Recorder", "Notes" jaisi apps hoti hain.
+     * Inki wajah se aadha-adhoora milan (prefix/contains) "screen", "call",
+     * "note" jaise shabdon ko app samajh leta tha aur galat app khul jaati
+     * thi. Ye shabd sirf tabhi app maane jayenge jab app ka poora naam hi
+     * wahi ho.
+     */
+    private val notAppWords = setOf(
+        "screen", "screenshot", "call", "phone", "note", "notes", "time", "timer",
+        "alarm", "video", "photo", "selfie", "message", "msg", "sms", "volume",
+        "awaz", "awaaz", "sound", "torch", "batti", "light", "lock", "home",
+        "back", "music", "song", "gaana", "gana", "reminder", "mausam", "weather",
+        "location", "battery", "storage", "brightness", "scroll", "type", "search",
+        "data", "wifi", "bluetooth",
+    )
+
     /** Ek hi regex ke andar sab connectors — dono jagah yahi list chalti hai. */
     private const val CONNECTOR_PATTERN = "pe|per|pey|peh|par|pr|me|mein|main|on|in"
 
@@ -1159,6 +1198,10 @@ object CommandParser {
     /**
      * Matches a spoken name against the curated catalog first, then against
      * every app installed on the phone (exact -> no-space -> prefix -> contains).
+     *
+     * Aadha-adhoora milan (prefix/contains) ab sirf lambe aur khaas naamon pe
+     * hota hai. Pehle "screen per kya likha hai" me "screen" bhi app ka naam
+     * maan liya jata tha aur phone ki "Screen Lock" app khul jaati thi.
      */
     fun resolveApp(name: String, installedApps: List<InstalledApp>): AppTarget? {
         val n = cleanQuery(normalize(name))
@@ -1178,22 +1221,32 @@ object CommandParser {
         installedApps.firstOrNull { normalize(it.label).replace(" ", "") == compact }
             ?.let { return AppTarget(it.label, it.packageName) }
 
+        // Yahan se aage sirf andaza hai — isliye aam shabd aur bahut chhote
+        // naam yahin ruk jate hain.
+        if (n in notAppWords || n.length < 4) return null
+
         installedApps.firstOrNull { normalize(it.label).startsWith(n) }
             ?.let { return AppTarget(it.label, it.packageName) }
 
-        if (n.length >= 3) {
-            installedApps.firstOrNull { normalize(it.label).contains(n) }
+        if (n.length >= 5) {
+            installedApps.firstOrNull { phraseRegex(n).containsMatchIn(normalize(it.label)) }
                 ?.let { return AppTarget(it.label, it.packageName) }
         }
 
         return null
     }
 
+    /**
+     * Chhota-mota saaf karna: chhote akshar, punctuation hata ke, aur ek hi
+     * matlab wali spellings ek shakl me ([spellingFixes]).
+     */
     private fun normalize(input: String): String = input
         .lowercase()
         .replace(Regex("[?!.,;:\"']"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
+        .split(" ")
+        .joinToString(" ") { token -> spellingFixes[token] ?: token }
 
     private fun containsWord(text: String, word: String): Boolean =
         phraseRegex(word).containsMatchIn(text)

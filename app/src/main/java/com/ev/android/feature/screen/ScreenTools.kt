@@ -58,8 +58,17 @@ data class ScreenResult(val ok: Boolean, val message: String)
  */
 object ScreenTools {
 
-    /** Screenshot gallery me aane me thoda waqt leta hai. */
-    private const val SHOT_SETTLE_MS = 1800L
+    /** Screenshot gallery me aane me thoda waqt leta hai - itni baar dekho. */
+    private const val SHOT_RETRIES = 6
+
+    /** Do koshishon ke beech ka gap. */
+    private const val SHOT_RETRY_MS = 1000L
+
+    /**
+     * Ghadi thodi aage-peeche ho sakti hai, isliye itne second peeche tak ki
+     * photo bhi "nayi" maani jayegi.
+     */
+    private const val SHOT_CLOCK_SLACK_SEC = 5L
 
     /** Itni der E.V ke overlay gayab rehte hain. */
     private const val OVERLAY_HIDE_MS = 4000L
@@ -149,14 +158,19 @@ object ScreenTools {
      * me naam khud likh diya jata hai - bas contact pe tap karna reh jata hai.
      * WhatsApp kisi bahar wali app ko contact chunne nahi deta, isliye ye aakhri
      * tap hatana mumkin nahi hai; imaandari se itna hi ho sakta hai.
+     *
+     * Screenshot gallery me aane me kuch phones me 4-5 second lag jate hain,
+     * isliye ek hi baar dekh ke haar maan lena galat tha - ab baar baar dekhte
+     * hain, aur sirf wahi photo lete hain jo command ke baad bani ho (warna
+     * koi purani photo bhej dene ka khatra tha).
      */
     private suspend fun shotAndShare(context: Context, target: String?): ScreenResult {
+        val since = System.currentTimeMillis() / 1000 - SHOT_CLOCK_SLACK_SEC
+
         val taken = takeScreenshot(context)
         if (!taken.ok) return taken
 
-        delay(SHOT_SETTLE_MS)
-
-        val uri = latestImage(context) ?: return ScreenResult(
+        val uri = awaitNewImage(context, since) ?: return ScreenResult(
             false,
             "Screenshot to ho gaya, par gallery me mila nahi \u2014 khud bhej do",
         )
@@ -189,6 +203,15 @@ object ScreenTools {
         }
     }
 
+    /** Nayi photo ka intezaar - har second dekhte rehte hain. */
+    private suspend fun awaitNewImage(context: Context, since: Long): Uri? {
+        repeat(SHOT_RETRIES) {
+            delay(SHOT_RETRY_MS)
+            latestImage(context, since)?.let { return it }
+        }
+        return null
+    }
+
     private fun shareIntent(uri: Uri): Intent = Intent(Intent.ACTION_SEND).apply {
         type = "image/*"
         putExtra(Intent.EXTRA_STREAM, uri)
@@ -217,15 +240,15 @@ object ScreenTools {
         }
     }
 
-    /** Gallery me sabse nayi photo - screenshot lene ke turant baad yahi hoti hai. */
-    private fun latestImage(context: Context): Uri? = runCatching {
+    /** [since] (seconds) ke baad bani sabse nayi photo. */
+    private fun latestImage(context: Context, since: Long): Uri? = runCatching {
         val projection = arrayOf(MediaStore.Images.Media._ID)
 
         context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             projection,
-            null,
-            null,
+            MediaStore.Images.Media.DATE_ADDED + " >= ?",
+            arrayOf(since.toString()),
             MediaStore.Images.Media.DATE_ADDED + " DESC",
         )?.use { cursor ->
             if (cursor.moveToFirst()) {
