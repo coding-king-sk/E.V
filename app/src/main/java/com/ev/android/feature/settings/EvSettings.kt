@@ -194,11 +194,16 @@ object EvSettings {
     /**
      * Offline wake word (sherpa-onnx) use karna hai ya Google recognizer.
      *
-     * Default **off** \u2014 isme model download karna padta hai aur tuning bhi,
-     * isliye user khud chune tabhi.
+     * Default ab **on** hai. Pehle ye off tha aur natija ye ki "Hey E.V" kabhi
+     * theek se kaam hi nahi karta tha: Google recognizer session me sunta hai
+     * \u2014 12 second sunta hai, rukta hai, phir se shuru hota hai, aur beech ke
+     * un chhote chhote gaps me bola hua naam gir jata hai. Offline KWS mic ko
+     * [android.media.AudioRecord] se **lagataar** padhta hai, bina kisi rukawat
+     * ke. Model apne aap download ho jata hai, isliye ab user ko kuch karna hi
+     * nahi padta.
      */
     fun offlineWakeWord(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_OFFLINE_WAKE, false)
+        prefs(context).getBoolean(KEY_OFFLINE_WAKE, true)
 
     fun setOfflineWakeWord(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_OFFLINE_WAKE, value).apply()

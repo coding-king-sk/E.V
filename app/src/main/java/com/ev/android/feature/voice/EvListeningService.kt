@@ -39,17 +39,19 @@ import kotlinx.coroutines.launch
 /**
  * Hands-free mode.
  *
- * Ye foreground service hai (notification ke saath) — Android background me
+ * Ye foreground service hai (notification ke saath) \u2014 Android background me
  * mic use karne hi nahi deta, aur notification se user ko hamesha pata rehta
  * hai ki mic on hai. Chhupa ke sunne wala kaam E.V nahi karta.
  *
  * Sunne ke do tareeke hain:
- *  - **Google recognizer** (default): baar baar session restart karke sunta hai
- *  - **Offline KWS** (Settings me on karne pe): sherpa-onnx phone ke andar hi
- *    wake word pakadta hai, audio kahin nahi jata
+ *  - **Offline KWS** (ab default): sherpa-onnx [android.media.AudioRecord] se
+ *    mic ko lagataar padhta hai aur phone ke andar hi wake word pakadta hai.
+ *    Koi session nahi, koi rukawat nahi, audio kahin nahi jata.
+ *  - **Google recognizer** (fallback): jab model ya native library na ho.
+ *    Ye session me sunta hai, isliye beech me chhote gaps rehte hain.
  *
  * Dono ek saath mic nahi le sakte, isliye offline mode me mic barabar haath
- * badalta hai: KWS sunta hai → wake → mic recognizer ko → command → wapas KWS.
+ * badalta hai: KWS sunta hai \u2192 wake \u2192 mic recognizer ko \u2192 command \u2192 wapas KWS.
  */
 class EvListeningService : Service() {
 
@@ -66,7 +68,7 @@ class EvListeningService : Service() {
          * shikayat ki jad thi: service shuru hote hi "E.V taiyaar hai" bolti
          * hai, aur us waqt tak TTS engine poori tarah taiyaar nahi hota. Uska
          * "bol diya" wala callback kabhi aata hi nahi tha, aur mic poore 20
-         * second band pada rehta tha — usi beech me user "Hey E.V" bol ke dekh
+         * second band pada rehta tha \u2014 usi beech me user "Hey E.V" bol ke dekh
          * raha hota tha.
          */
         private const val SAFETY_RESUME_MS = 6_000L
@@ -104,6 +106,7 @@ class EvListeningService : Service() {
     private var wakeWord: SherpaWakeWord? = null
     private var offlineWake = false
     private var awaitingCommandAfterWake = false
+    private var modelDownloadStarted = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -116,7 +119,7 @@ class EvListeningService : Service() {
         // Mic permission ke bina Android 14+ pe "microphone" type ka foreground
         // service start karna SecurityException deta hai. Ye tab hota hai jab
         // user permission hata de aur system START_STICKY ki wajah se service
-        // dobara chala de — pehle yahan app crash ho jati thi.
+        // dobara chala de \u2014 pehle yahan app crash ho jati thi.
         val micGranted = ContextCompat.checkSelfPermission(
             this,
             Manifest.permission.RECORD_AUDIO,
@@ -143,15 +146,23 @@ class EvListeningService : Service() {
             },
         )
 
-        // Teeno cheezein honi chahiye: user ne on kiya ho, native library ho,
-        // aur model download ho. Kisi ek ki bhi kami me Google recognizer.
-        offlineWake = EvSettings.offlineWakeWord(this) &&
-            SherpaWakeWord.isLibraryAvailable() &&
-            WakeWordModel.isInstalled(this)
+        // Lagataar sunne ke liye do cheezein chahiye: native library (APK me
+        // hai) aur model (chalte waqt download hota hai). Library na ho to
+        // kuch nahi ho sakta; sirf model ki kami ho to wo peeche peeche utar
+        // jata hai aur mic khud offline mode pe chala jata hai.
+        val wantsOffline = EvSettings.offlineWakeWord(this) &&
+            SherpaWakeWord.isLibraryAvailable()
 
-        if (offlineWake) startWakeWord() else listener?.start()
+        offlineWake = wantsOffline && WakeWordModel.isInstalled(this)
 
-        // Chhoti si awaz — isse turant pata chal jata hai ki service zinda hai.
+        if (offlineWake) {
+            startWakeWord()
+        } else {
+            listener?.start()
+            if (wantsOffline) ensureWakeWordModel()
+        }
+
+        // Chhoti si awaz \u2014 isse turant pata chal jata hai ki service zinda hai.
         //
         // Yahan chhota safety time isliye ki TTS abhi abhi bana hai; agar wo ye
         // line nigal gaya to bhi mic do-teen second me wapas chalu ho jaye.
@@ -169,7 +180,7 @@ class EvListeningService : Service() {
             return START_NOT_STICKY
         }
 
-        // Mic permission na hone ki wajah se listener bana hi nahi — aise me
+        // Mic permission na hone ki wajah se listener bana hi nahi \u2014 aise me
         // system ko baar baar service restart karne ka koi fayda nahi.
         if (listener == null) return START_NOT_STICKY
 
@@ -196,10 +207,39 @@ class EvListeningService : Service() {
 
     // ----------------------------------------------------- offline wake word
 
+    /**
+     * Model chupchaap peeche download kar lo (~4 MB).
+     *
+     * Pehle ye Settings me ek button tha, jise koi dabata hi nahi tha \u2014 aur
+     * bina model ke lagataar sunwai chalti hi nahi. Ab pehli baar app chalate
+     * hi utar jata hai. Tab tak Google recognizer sunta rehta hai, isliye user
+     * ko koi intezaar nahi karna padta. Download fail ho jaye to bhi kuch nahi
+     * bigadta \u2014 agli baar phir koshish hogi.
+     */
+    private fun ensureWakeWordModel() {
+        if (modelDownloadStarted) return
+        modelDownloadStarted = true
+
+        scope.launch {
+            val saved = EvSettings.wakeWordModelUrl(this@EvListeningService)
+            val url = if (saved.isEmpty()) WakeWordModel.DEFAULT_URL else saved
+
+            val result = WakeWordModel.download(this@EvListeningService, url)
+            if (result.isFailure) return@launch
+
+            // Beech me user bol raha ho to mic chheenna theek nahi \u2014 agli baar
+            // service shuru hone pe apne aap offline mode me chala jayega.
+            if (awaitingCommandAfterWake) return@launch
+
+            offlineWake = true
+            startWakeWord()
+        }
+    }
+
     private fun startWakeWord() {
         if (!offlineWake) return
 
-        // Recognizer ko mic chhodna padega — do cheezein ek saath mic nahi
+        // Recognizer ko mic chhodna padega \u2014 do cheezein ek saath mic nahi
         // le sakti.
         listener?.stop()
 
@@ -226,7 +266,7 @@ class EvListeningService : Service() {
     }
 
     /**
-     * Offline KWS kaam nahi kar raha — chupchaap Google recognizer pe wapas.
+     * Offline KWS kaam nahi kar raha \u2014 chupchaap Google recognizer pe wapas.
      *
      * User ko error sunane ka koi fayda nahi; use bas ye chahiye ki E.V sunta
      * rahe. Wajah Settings me dikh hi jayegi.
@@ -256,7 +296,7 @@ class EvListeningService : Service() {
      * Chaar seedhiyan: offline parser -> AI se command -> AI se seedha jawab ->
      * browser se jawab. Har seedhi tabhi chalti hai jab pichli haar jaye.
      *
-     * Aakhri seedhi ([WebLlmBridge]) ko na key chahiye na account — wo bas
+     * Aakhri seedhi ([WebLlmBridge]) ko na key chahiye na account \u2014 wo bas
      * sawaal ko browser me khol ke jawab screen se padh leti hai.
      */
     private fun runCommand(text: String) {
@@ -273,7 +313,7 @@ class EvListeningService : Service() {
             }
 
             if (command is EvCommand.Unknown) {
-                // Command nahi hai — shayad sawaal hai.
+                // Command nahi hai \u2014 shayad sawaal hai.
                 val reply = Conversation.answer(this@EvListeningService, text)
                     ?: WebLlmBridge.ask(this@EvListeningService, text)
 
@@ -328,7 +368,7 @@ class EvListeningService : Service() {
             return
         }
 
-        // Wake ho chuka hai — ab naam dobara bolne ki zaroorat nahi, jo bhi
+        // Wake ho chuka hai \u2014 ab naam dobara bolne ki zaroorat nahi, jo bhi
         // bolo wahi command hai.
         listener?.listenForCommand()
 
