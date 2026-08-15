@@ -26,6 +26,7 @@ private enum class Verb { PLAY, OPEN, SEARCH }
  *  "aaj mausam kaisa hai"                 -> Weather(0)
  *  "1500 ka 18% kitna hota hai"           -> Calculate
  *  "google pe sachin search karo"         -> WebSearch("sachin")
+ *  "photosynthesis kya hai"               -> Unknown (browser wala Gemini jawab dega)
  *  "photo lo"                             -> TakePhoto(front = false)
  *  "screen pe kya likha hai"              -> Screen(READ)
  *  "screenshot le kar rehan ko bhejo"     -> Screen(SHARE_SHOT, "rehan")
@@ -410,6 +411,27 @@ object CommandParser {
     private val googleWords = listOf("google", "gugal", "gogle", "googal")
 
     /**
+     * Aam gyaan wale sawaal.
+     *
+     * Ye sabse badi shikayat thi: "duniya ka sabse bada desh kaun sa hai"
+     * bolne par Google ka search page khul jaata tha, jawab nahi milta tha.
+     * Ab aise vaakya kisi command me nahi badalte — wo [EvCommand.Unknown]
+     * bante hain aur app unhe browser wale Gemini/ChatGPT ke paas bhejti hai,
+     * jahan se seedha jawab aata hai.
+     *
+     * Phone ke apne sawaal (battery, time, mausam, location, screen, hisaab)
+     * isse pehle hi nipat chuke hote hain — unke parser upar chalte hain.
+     */
+    private val questionWords = listOf(
+        "kya", "kyu", "kyun", "kyon", "kaise", "kaisa", "kaisi",
+        "kaun", "kon", "kaunsa", "konsa", "kaun sa", "kon sa",
+        "kitna", "kitni", "kitne", "kab", "kahan", "kaha",
+        "batao", "bata do", "bta do", "samjhao", "samjha do",
+        "matlab", "meaning", "explain", "difference",
+        "what", "who", "why", "how", "when", "where", "which",
+    )
+
+    /**
      * Mausam ke shabd.
      *
      * "baarish" aur "temperature" bhi yahan hain kyunki log seedha wahi
@@ -598,6 +620,12 @@ object CommandParser {
         // Messaging ki shape ("<naam> ko ... bhejo") bahut distinctive hai.
         parseMessage(normalized)?.let { return it }
 
+        // "duniya ka sabse bada desh kaun sa hai" — phone ka koi kaam nahi,
+        // seedha sawaal hai. Isko Unknown rehne dete hain taki app browser
+        // wale Gemini se jawab la sake. Yahi cheez pehle Google ka search
+        // page khol deti thi.
+        if (isGeneralQuestion(normalized, installedApps)) return EvCommand.Unknown(raw)
+
         // "google pe sachin tendulkar search karo"
         parseWebSearch(normalized)?.let { return it }
 
@@ -625,9 +653,15 @@ object CommandParser {
                 else -> EvCommand.PlayMedia(query, app ?: youtube)
             }
 
+            // "instagram pe rehan search karo" -> app ke andar search.
+            //
+            // Par bina app ke "quantum physics search karo" ko YouTube pe
+            // bhejna bekaar tha — user jawab chahta hai. Ab wo Unknown hai,
+            // yaani browser wala Gemini jawab dega.
             Verb.SEARCH -> when {
-                query.isEmpty() -> app?.let { EvCommand.OpenApp(it) } ?: EvCommand.Unknown(raw)
-                else -> EvCommand.SearchInApp(query, app ?: youtube)
+                app == null -> EvCommand.Unknown(raw)
+                query.isEmpty() -> EvCommand.OpenApp(app)
+                else -> EvCommand.SearchInApp(query, app)
             }
 
             Verb.OPEN -> (app ?: resolveApp(query, installedApps))
@@ -638,6 +672,28 @@ object CommandParser {
                 ?.let { EvCommand.OpenApp(it) }
                 ?: EvCommand.Unknown(raw)
         }
+    }
+
+    /**
+     * Kya ye sirf ek sawaal hai jiska jawab phone ke paas nahi hai?
+     *
+     * Shart teen hain:
+     *  1. Koi poochne wala shabd ho ("kya", "kaun", "kyun", "batao"…).
+     *  2. Kisi app ko kholne/chalane ki baat na ho — "youtube kholo" sawaal
+     *     nahi hai, aur "instagram pe reels chalao" bhi nahi.
+     *  3. Vaakya ke shuru me kisi app ka naam na ho ("youtube pe kya trend
+     *     kar raha hai" jaisa vaakya app ke hawale rehna chahiye).
+     */
+    private fun isGeneralQuestion(text: String, installedApps: List<InstalledApp>): Boolean {
+        if (questionWords.none { containsWord(text, it) }) return false
+        if (matchPhrase(text, openVerbs) != null) return false
+        if (matchPhrase(text, playVerbs) != null) return false
+
+        val startsWithApp = targetSplitRegex.find(text)
+            ?.let { resolveApp(it.groupValues[1], installedApps) != null }
+            ?: false
+
+        return !startsWithApp
     }
 
     // --------------------------------------------------------------- screen
@@ -792,6 +848,9 @@ object CommandParser {
      * Google koi app target nahi hai (har phone me alag browser hota hai),
      * isliye ise alag se pakadte hain. Sirf "google kholo" bola ho to search
      * page khol dete hain.
+     *
+     * Yahan tabhi pahunchte hain jab user ne khud "google" bola ho. Aam sawaal
+     * ([isGeneralQuestion]) isse pehle hi nikal jaate hain.
      */
     private fun parseWebSearch(text: String): EvCommand? {
         if (googleWords.none { containsWord(text, it) }) return null
