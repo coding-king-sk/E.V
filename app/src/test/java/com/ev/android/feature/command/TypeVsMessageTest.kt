@@ -33,8 +33,22 @@ class TypeVsMessageTest {
     /** "type" wala raasta pehle jaisa hi chalta hai. */
     @Test
     fun `app pe type karo typing hi rehta hai`() {
+        val command = parse("instagram pe type karo hello dost")
+        assertTrue(command is EvCommand.TypeText)
+        assertEquals("hello dost", (command as EvCommand.TypeText).text)
+    }
+
+    /**
+     * Bharti ke shabd kinare se hat jaate hain.
+     *
+     * Ye jaan-boojh ke hai — "zara type karo hello" me "zara" type nahi hona
+     * chahiye. Iska saath wala asar ye hai ki "hello bhai" me aakhri "bhai"
+     * bhi hat jata hai, kyunki wo bhi bharti ki list me hai.
+     */
+    @Test
+    fun `kinare ke bharti shabd type nahi hote`() {
         val command = parse("instagram pe type karo hello bhai")
         assertTrue(command is EvCommand.TypeText)
-        assertEquals("hello bhai", (command as EvCommand.TypeText).text)
+        assertEquals("hello", (command as EvCommand.TypeText).text)
     }
 }
