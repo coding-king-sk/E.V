@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import com.ev.android.feature.ai.AiCommandResolver
 import com.ev.android.feature.ai.AiOutcome
 import com.ev.android.feature.ai.Conversation
+import com.ev.android.feature.ai.WebLlmBridge
 import com.ev.android.feature.apps.InstalledApp
 import com.ev.android.feature.apps.InstalledAppsRepository
 import com.ev.android.feature.command.CommandExecutor
@@ -58,8 +59,20 @@ class EvListeningService : Service() {
 
         const val ACTION_STOP = "com.ev.android.action.STOP_LISTENING"
 
-        /** TTS callback kisi wajah se na aaye to bhi mic wapas chalu ho jaye. */
-        private const val SAFETY_RESUME_MS = 20_000L
+        /**
+         * TTS callback kisi wajah se na aaye to bhi mic wapas chalu ho jaye.
+         *
+         * Pehle ye 20 second tha aur wahi "wake word kaam hi nahi karta" wali
+         * shikayat ki jad thi: service shuru hote hi "E.V taiyaar hai" bolti
+         * hai, aur us waqt tak TTS engine poori tarah taiyaar nahi hota. Uska
+         * "bol diya" wala callback kabhi aata hi nahi tha, aur mic poore 20
+         * second band pada rehta tha — usi beech me user "Hey E.V" bol ke dekh
+         * raha hota tha.
+         */
+        private const val SAFETY_RESUME_MS = 6_000L
+
+        /** Shuru wali chhoti awaz ke liye itna hi kaafi hai. */
+        private const val GREETING_RESUME_MS = 2_500L
 
         /** Wake ke baad itni der command na aaye to wapas KWS pe chale jao. */
         private const val COMMAND_WINDOW_MS = 14_000L
@@ -139,7 +152,10 @@ class EvListeningService : Service() {
         if (offlineWake) startWakeWord() else listener?.start()
 
         // Chhoti si awaz — isse turant pata chal jata hai ki service zinda hai.
-        say("E.V taiyaar hai")
+        //
+        // Yahan chhota safety time isliye ki TTS abhi abhi bana hai; agar wo ye
+        // line nigal gaya to bhi mic do-teen second me wapas chalu ho jaye.
+        say("E.V taiyaar hai", GREETING_RESUME_MS)
 
         // App list background me load hoti rehti hai; tab tak bhi commands chalte hain.
         scope.launch {
@@ -237,8 +253,11 @@ class EvListeningService : Service() {
     // ------------------------------------------------------------- commands
 
     /**
-     * Teen seedhiyan: offline parser -> AI se command -> AI se seedha jawab.
-     * Har seedhi tabhi chalti hai jab pichli haar jaye.
+     * Chaar seedhiyan: offline parser -> AI se command -> AI se seedha jawab ->
+     * browser se jawab. Har seedhi tabhi chalti hai jab pichli haar jaye.
+     *
+     * Aakhri seedhi ([WebLlmBridge]) ko na key chahiye na account — wo bas
+     * sawaal ko browser me khol ke jawab screen se padh leti hai.
      */
     private fun runCommand(text: String) {
         awaitingCommandAfterWake = false
@@ -254,16 +273,19 @@ class EvListeningService : Service() {
             }
 
             if (command is EvCommand.Unknown) {
-                // Command nahi hai — shayad sawaal hai. Groq se jawab le lo.
+                // Command nahi hai — shayad sawaal hai.
                 val reply = Conversation.answer(this@EvListeningService, text)
+                    ?: WebLlmBridge.ask(this@EvListeningService, text)
+
                 val message = reply
-                    ?: "Samajh nahi aaya. Settings me Groq key daal do to " +
-                    "main sawaalon ke jawab bhi de sakta hoon."
+                    ?: "Samajh nahi aaya, aur jawab bhi nahi mil paya. " +
+                    "Accessibility me E.V on hai to main sawaal browser se " +
+                    "bhi dhoondh sakta hoon."
 
                 CommandHistory.add(
                     context = this@EvListeningService,
                     spoken = text,
-                    understood = if (reply != null) "Sawaal (AI)" else "Samajh nahi aaya",
+                    understood = if (reply != null) "Sawaal (jawab mila)" else "Samajh nahi aaya",
                     reply = message,
                 )
 
@@ -285,12 +307,12 @@ class EvListeningService : Service() {
     }
 
     /** Bolte waqt mic band, bolne ke baad wapas chalu. */
-    private fun say(text: String) {
+    private fun say(text: String, safetyMs: Long = SAFETY_RESUME_MS) {
         listener?.pause()
         safety.removeCallbacksAndMessages(null)
 
         Speaker.speak(text) { resumeListening() }
-        safety.postDelayed({ resumeListening() }, SAFETY_RESUME_MS)
+        safety.postDelayed({ resumeListening() }, safetyMs)
     }
 
     private fun resumeListening() {
