@@ -435,6 +435,17 @@ object CommandParser {
     private val notificationWords = listOf("notification", "notifications")
     private val settingsWords = listOf("settings", "setting")
 
+    /**
+     * Phone ki settings ke saath chalne wale bekaar shabd.
+     *
+     * "phone ki settings kholo" me sirf yahi bachte hain, isliye ye phone ki
+     * settings hi hai. Koi aur naam bacha (jaise "whatsapp") to matlab app ki
+     * apni settings hai — dekho [onlySettingsLeft].
+     */
+    private val settingsExtraWords = setOf(
+        "phone", "mobile", "fone", "system", "android", "device", "wala", "wali",
+    )
+
     /** Timer ke shabd — "time" isliye ki log "2 minut ka time lagao" bolte hain. */
     private val timerWords = listOf("timer", "taimer", "taymer", "time", "tym")
 
@@ -1088,7 +1099,8 @@ object CommandParser {
             has(dataWords) && hasModifier -> DeviceAction.MOBILE_DATA
 
             // "settings kholo" — sirf tab jab koi app ka naam saath me na ho.
-            has(settingsWords) && matchPhrase(text, openVerbs) != null -> DeviceAction.SETTINGS
+            has(settingsWords) && matchPhrase(text, openVerbs) != null &&
+                onlySettingsLeft(text) -> DeviceAction.SETTINGS
 
             else -> null
         }
@@ -1101,6 +1113,29 @@ object CommandParser {
             }
             EvCommand.Device(it, level)
         }
+    }
+
+    /**
+     * "settings kholo" me settings aur kholne ke alawa kuch bacha hai ya nahi.
+     *
+     * "phone ki settings kholo" me kuch nahi bachta, to wo phone ki settings
+     * hai. Par "whatsapp settings kholo" me ek app ka naam bach jata hai —
+     * wahan user app ki apni settings chahta hai, phone ki nahi, isliye hum
+     * kuch nahi karte aur command aage app wale hisse me chali jaati hai.
+     *
+     * Comment pehle se yahi keh raha tha, par check hi nahi tha.
+     */
+    private fun onlySettingsLeft(text: String): Boolean {
+        var work = text
+        settingsWords.forEach { work = work.replace(phraseRegex(it), " ") }
+        matchPhrase(text, openVerbs)?.let { verb ->
+            work = work.replace(phraseRegex(verb), " ")
+        }
+
+        return normalize(work)
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .all { it in settingsExtraWords || it in fillerWords || it in connectors }
     }
 
     // --------------------------------------------------------------- shared
