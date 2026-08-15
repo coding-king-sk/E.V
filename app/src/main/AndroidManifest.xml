@@ -66,8 +66,9 @@
         jaane ki zaroorat nahi. SCHEDULE_EXACT_ALARM Android 12 ke liye hai.
         Waise bhi ab reminders setAlarmClock se lagte hain, jise permission
         chahiye hi nahi.
-        RECEIVE_BOOT_COMPLETED isliye ki reboot ke baad pending reminders
-        dobara set ho jayein \u2014 Android reboot pe saare alarms bhool jata hai.
+        RECEIVE_BOOT_COMPLETED do kaam ke liye: reboot ke baad pending reminders
+        dobara set ho jayein (Android reboot pe saare alarms bhool jata hai),
+        aur "Hey E.V" sunne wali service bhi khud chalu ho jaye.
     -->
     <uses-permission
         android:name="android.permission.USE_EXACT_ALARM"
@@ -152,6 +153,7 @@
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.shazam.android" />
         <package android:name="com.google.android.deskclock" />
+        <package android:name="com.android.chrome" />
     </queries>
 
     <application
@@ -218,6 +220,18 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Phone on hote hi "Hey E.V" sunna shuru. -->
+        <receiver
+            android:name=".feature.voice.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
     </application>
