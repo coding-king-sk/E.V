@@ -29,11 +29,11 @@ object EvWeather {
     /** @param dayOffset 0 = aaj, 1 = kal, 2 = parso */
     suspend fun describe(context: Context, dayOffset: Int): String = withContext(Dispatchers.IO) {
         val point = EvLocation.coordinates(context)
-            ?: return@withContext "Mausam ke liye location chahiye \u2014 phone ki location " +
+            ?: return@withContext "Mausam ke liye location chahiye — phone ki location " +
                 "on karo aur E.V ko location ki permission de do"
 
         val json = fetch(point.first, point.second)
-            ?: return@withContext "Mausam nahi mil paya \u2014 internet check karo"
+            ?: return@withContext "Mausam nahi mil paya — internet check karo"
 
         val place = EvLocation.shortPlace(context)
 
@@ -46,7 +46,7 @@ object EvWeather {
      * Abhi ka haal.
      *
      * "Mehsoos kitna hota hai" tabhi bolte hain jab asli temperature se do
-     * degree se zyada farak ho \u2014 warna wahi baat do baar kehne jaisa lagta hai.
+     * degree se zyada farak ho — warna wahi baat do baar kehne jaisa lagta hai.
      */
     private fun todayLine(json: JSONObject, place: String?): String {
         val current = json.getJSONObject("current")
@@ -74,6 +74,13 @@ object EvWeather {
         return parts.joinToString(", ") + "."
     }
 
+    /**
+     * Aane wale dinon ka haal.
+     *
+     * Din ka naam ab teeno case me sahi hai. Pehle 2 aur 3 dono "Parso" bolte
+     * the — parser filhaal 3 nahi bhejta, par AI ya koi naya caller bhej de to
+     * jawab galat hota, isliye teesre din ka naam saaf likh diya hai.
+     */
     private fun laterLine(json: JSONObject, dayOffset: Int): String {
         val daily = json.getJSONObject("daily")
         val index = dayOffset.coerceIn(1, 3)
@@ -86,13 +93,17 @@ object EvWeather {
         val min = daily.getJSONArray("temperature_2m_min").getDouble(index).roundToInt()
         val rain = daily.getJSONArray("precipitation_probability_max").optDouble(index, -1.0)
 
-        val day = if (index == 1) "Kal" else "Parso"
+        val day = when (index) {
+            1 -> "Kal"
+            2 -> "Parso"
+            else -> "Teen din baad"
+        }
         val tail = if (rain >= 0) ", baarish ka chance " + rain.roundToInt() + "%" else ""
 
         return day + " " + sky + ", " + min + "\u00B0 se " + max + "\u00B0" + tail + "."
     }
 
-    /** WMO ke code \u2014 Open-Meteo inhi numbers me mausam batata hai. */
+    /** WMO ke code — Open-Meteo inhi numbers me mausam batata hai. */
     private fun skyOf(code: Int): String = when (code) {
         0 -> "aasman bilkul saaf"
         1 -> "zyadatar saaf"
@@ -118,7 +129,7 @@ object EvWeather {
     /**
      * Network call.
      *
-     * Plain HttpURLConnection \u2014 poori app me yahi chalta hai, sirf mausam ke
+     * Plain HttpURLConnection — poori app me yahi chalta hai, sirf mausam ke
      * liye koi nayi library jodna theek nahi.
      */
     private fun fetch(lat: Double, lon: Double): JSONObject? = runCatching {

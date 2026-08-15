@@ -61,10 +61,15 @@ class CameraCaptureActivity : ComponentActivity() {
         }
         setContentView(previewView)
 
+        // TTS engine ko jagane me thoda waqt lagta hai, isliye ise shuru me hi
+        // chalu kar dete hain. Pehle init sirf done() me hota tha, jiski wajah
+        // se "recording shuru" wali pehli line chup-chaap gayab ho jati thi.
+        Speaker.init(applicationContext)
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            done("Camera ki permission nahi hai \u2014 Settings me de do")
+            done("Camera ki permission nahi hai — Settings me de do")
             return
         }
 
@@ -127,7 +132,7 @@ class CameraCaptureActivity : ComponentActivity() {
                 return@addListener
             }
 
-            // Thoda rukna zaroori hai \u2014 warna auto-focus aur exposure set hone se
+            // Thoda rukna zaroori hai — warna auto-focus aur exposure set hone se
             // pehle hi photo khinch jati hai aur dhundhli aati hai.
             handler.postDelayed({
                 if (mode == CameraCapture.MODE_VIDEO) startRecording(seconds)
@@ -157,7 +162,7 @@ class CameraCaptureActivity : ComponentActivity() {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    done("Photo le li \u2014 gallery me save ho gayi")
+                    done("Photo le li — gallery me save ho gayi")
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -200,7 +205,7 @@ class CameraCaptureActivity : ComponentActivity() {
             recording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
                 if (event is VideoRecordEvent.Finalize) {
                     if (event.hasError()) done("Video save nahi ho paya")
-                    else done("Video ban gaya \u2014 gallery me save ho gaya")
+                    else done("Video ban gaya — gallery me save ho gaya")
                 }
             }
         }.isSuccess
@@ -210,6 +215,8 @@ class CameraCaptureActivity : ComponentActivity() {
             return
         }
 
+        // Speaker onCreate me hi init ho chuka hai, isliye ye line ab sunai
+        // deti hai.
         Speaker.speak(safeSeconds.toString() + " second ki recording shuru")
 
         handler.postDelayed({
