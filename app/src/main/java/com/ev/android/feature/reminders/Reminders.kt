@@ -22,7 +22,7 @@ data class Reminder(val id: Int, val at: Long, val text: String)
  * E.V ke apne reminders.
  *
  * Alarm aur timer to phone ki Clock app ko de dete hain, lekin wahan sirf awaz
- * bajti hai \u2014 "kya karna tha" nahi pata chalta. Reminder E.V khud rakhta hai,
+ * bajti hai — "kya karna tha" nahi pata chalta. Reminder E.V khud rakhta hai,
  * aur waqt aane par bol ke batata hai.
  *
  * Reboot ke baad Android saare alarms bhool jata hai, isliye list prefs me
@@ -42,7 +42,7 @@ object Reminders {
      * @return false tabhi jab system ne alarm set hi na karne diya
      */
     fun schedule(context: Context, at: Long, text: String): Boolean {
-        // Channel pehle. Pehle ye alarm ke BAAD banta tha \u2014 aur agar beech me
+        // Channel pehle. Pehle ye alarm ke BAAD banta tha — aur agar beech me
         // process mar jata to reminder bajne ke waqt channel hota hi nahi,
         // jiska matlab hai notification chup-chaap gayab.
         ensureChannel(context)
@@ -72,7 +72,7 @@ object Reminders {
         }.getOrDefault(emptyList())
     }
 
-    /** Sirf wo reminders jo abhi bajne baaki hain \u2014 Settings me yahi dikhte hain. */
+    /** Sirf wo reminders jo abhi bajne baaki hain — Settings me yahi dikhte hain. */
     fun upcoming(context: Context): List<Reminder> {
         val now = System.currentTimeMillis()
         return all(context).filter { it.at > now }.sortedBy { it.at }
@@ -81,7 +81,7 @@ object Reminders {
     /**
      * Kya system hume theek waqt pe bajane dega.
      *
-     * Ab ye sirf ek ishara hai, majboori nahi \u2014 [setAlarm] pehle
+     * Ab ye sirf ek ishara hai, majboori nahi — [setAlarm] pehle
      * `setAlarmClock` try karta hai, jise koi permission nahi chahiye.
      */
     fun canBeExact(context: Context): Boolean {
@@ -90,7 +90,7 @@ object Reminders {
         return runCatching { manager.canScheduleExactAlarms() }.getOrDefault(false)
     }
 
-    /** Notification band hai to reminder dikhega nahi \u2014 sirf awaaz aayegi. */
+    /** Notification band hai to reminder dikhega nahi — sirf awaaz aayegi. */
     fun notificationsBlocked(context: Context): Boolean =
         runCatching {
             !NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -100,15 +100,29 @@ object Reminders {
         save(context, all(context).filter { it.id != id })
     }
 
+    /**
+     * Reminder hatana.
+     *
+     * `FLAG_NO_CREATE` isliye: pehle yahan `FLAG_UPDATE_CURRENT` tha, jo
+     * PendingIntent **bana** deta hai agar wo pehle se na ho — yani cancel
+     * karte waqt ek nayi khaali PendingIntent banti thi (khaali text ke
+     * saath). Ab hum wahi purani wali dhoondte hain; na mile to cancel karne
+     * ke liye kuch hai hi nahi, sirf list se hata dete hain.
+     */
     fun cancel(context: Context, id: Int) {
         val manager = context.getSystemService(AlarmManager::class.java)
-        val pending = PendingIntent.getBroadcast(
+        val pending: PendingIntent? = PendingIntent.getBroadcast(
             context,
             id,
             fireIntent(context, id, ""),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE,
         )
-        runCatching { manager?.cancel(pending) }
+
+        if (pending != null) {
+            runCatching { manager?.cancel(pending) }
+            runCatching { pending.cancel() }
+        }
+
         remove(context, id)
     }
 
@@ -166,7 +180,7 @@ object Reminders {
     // --------------------------------------------------------------- private
 
     /**
-     * Alarm set karna \u2014 teen tareeke, sabse bharosemand pehle.
+     * Alarm set karna — teen tareeke, sabse bharosemand pehle.
      *
      * **Yahi wo bug tha jiski wajah se "2 minute baad yaad dilana" kaam nahi
      * karta tha.** Pehle exact-alarm permission na hone par
@@ -177,7 +191,7 @@ object Reminders {
      * `setAlarmClock` me ye dikkat hai hi nahi: use koi special permission
      * nahi chahiye, Doze use rok nahi sakta, aur wo hamesha theek waqt pe
      * bajta hai. Badle me status bar me ek chhota alarm ka nishan aa jata hai
-     * \u2014 ye sauda faayde ka hai.
+     * — ye sauda faayde ka hai.
      */
     private fun setAlarm(context: Context, reminder: Reminder): Boolean {
         val manager = context.getSystemService(AlarmManager::class.java) ?: return false

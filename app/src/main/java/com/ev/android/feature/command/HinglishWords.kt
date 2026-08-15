@@ -9,24 +9,24 @@ package com.ev.android.feature.command
  * ek jaisa nahi likhta**. Ek hi baat ke paanch-paanch spelling aate hain:
  * "awaaz / awaz / aawaz / avaaz", "minut / mint / minit", "bnao / banao".
  * Agar ek bhi shakl chhoot jaye to poori command "samajh nahi aaya" ban jati
- * hai \u2014 aur user ko lagta hai ki app kharab hai, jabki sirf spelling nayi thi.
+ * hai — aur user ko lagta hai ki app kharab hai, jabki sirf spelling nayi thi.
  *
  * Isliye ye file banayi gayi hai: **ek hi jagah jahan har shabd ki saari
  * shaklein likhi hain.** Naya bug mile ("E.V ne ye shabd nahi samjha") to
- * poora parser padhne ki zaroorat nahi \u2014 seedha yahan us shabd ki nayi shakl
+ * poora parser padhne ki zaroorat nahi — seedha yahan us shabd ki nayi shakl
  * jod do.
  *
  * ## Kaise jodna hai
  *
  * 1. Neeche apne matlab wali list dhoondo (jaise [VOLUME] ya [YES]).
- * 2. Nayi spelling ek nayi line me `"...",` ki tarah likh do \u2014 sab lowercase.
+ * 2. Nayi spelling ek nayi line me `"...",` ki tarah likh do — sab lowercase.
  * 3. Bas. Parser ki apni list ke saath ye milti-julti rakhi gayi hai, isliye
  *    dono jagah ek hi soch chalti hai.
  *
  * ## Do kaam ke niyam
  *
  * - **Sab lowercase.** Parser pehle sab kuch lowercase kar deta hai.
- * - **Chhote aam shabd akele mat daalo.** Jaise akela "call" \u2014 "call of duty
+ * - **Chhote aam shabd akele mat daalo.** Jaise akela "call" — "call of duty
  *   kholo" bhi call ban jayega. Aise shabd poore phrase ke saath likho
  *   ("call karo", "call lagao").
  */
@@ -34,14 +34,14 @@ object HinglishWords {
 
     // ------------------------------------------------------------ haan / na
 
-    /** "haan" ke saare roop \u2014 sawaal-jawab me kaam aate hain. */
+    /** "haan" ke saare roop — sawaal-jawab me kaam aate hain. */
     val YES = listOf(
         "haan", "han", "haa", "ha", "haan ji", "han ji", "ji", "ji haan",
         "theek hai", "thik hai", "tik hai", "sahi hai", "bilkul", "kar do",
         "ok", "okay", "okey", "yes", "yep", "yeah", "sure", "done",
     )
 
-    /** "nahi" ke saare roop \u2014 inhe sun kar kaam roka jata hai. */
+    /** "nahi" ke saare roop — inhe sun kar kaam roka jata hai. */
     val NO = listOf(
         "nahi", "nahin", "nai", "na", "mat karo", "rehne do", "rahne do",
         "chhod do", "chod do", "cancel", "cancel karo", "band karo",
@@ -50,11 +50,17 @@ object HinglishWords {
 
     // ------------------------------------------------------------ ginti
 
-    /** Bole gaye ginti ke shabd \u2014 "do minute", "paanch baje". */
+    /**
+     * Bole gaye ginti ke shabd — "do minute", "paanch baje".
+     *
+     * "no" yahan jaan-boojh ke nahi hai. Wo [NO] me bhi hai ("nahi" ke roop
+     * me), aur "no" ko 9 maanne se "no, rehne do" jaise jawab ginti ban jate
+     * the. Nau ke liye "nau" pehle se maujood hai.
+     */
     val NUMBERS = mapOf(
         "ek" to 1, "do" to 2, "teen" to 3, "tin" to 3, "char" to 4, "chaar" to 4,
         "panch" to 5, "paanch" to 5, "chhe" to 6, "che" to 6, "chah" to 6,
-        "saat" to 7, "sat" to 7, "aath" to 8, "ath" to 8, "nau" to 9, "no" to 9,
+        "saat" to 7, "sat" to 7, "aath" to 8, "ath" to 8, "nau" to 9,
         "das" to 10, "dus" to 10, "gyarah" to 11, "barah" to 12, "pandrah" to 15,
         "bees" to 20, "bis" to 20, "pachees" to 25, "tees" to 30, "chalis" to 40,
         "pachas" to 50, "pachaas" to 50, "saath" to 60, "sau" to 100,
@@ -230,7 +236,7 @@ object HinglishWords {
     // ------------------------------------------------------ jodne wale
 
     /**
-     * "pe / par / me" \u2014 ye sabse zaroori list hai.
+     * "pe / par / me" — ye sabse zaroori list hai.
      *
      * en-IN recognizer "pe" ko aksar **"per"** likh deta hai. Isse pehle poora
      * naam bigad jata tha ("whatsapp per rehan" me "per" naam ka hissa ban
@@ -238,10 +244,10 @@ object HinglishWords {
      */
     val ON_WORD = listOf("pe", "per", "pey", "peh", "par", "pr", "me", "mein", "main", "on", "in")
 
-    /** Vaakya jodne wale shabd \u2014 inse do kaam alag hote hain. */
+    /** Vaakya jodne wale shabd — inse do kaam alag hote hain. */
     val AND = listOf("aur", "or", "and", "phir", "fir", "uske baad", "iske baad", "then")
 
-    /** Bekar bharti ke shabd \u2014 inka matlab kuch nahi hota. */
+    /** Bekar bharti ke shabd — inka matlab kuch nahi hota. */
     val FILLER = listOf(
         "mujhe", "muje", "mereko", "zara", "jara", "please", "plz", "bhai", "yaar",
         "beta", "ok to", "to", "na", "thoda", "thodi", "ek kaam karo", "suno",
@@ -250,7 +256,7 @@ object HinglishWords {
     /**
      * Wake word ke roop.
      *
-     * "E.V" ko recognizer bahut tarah se likhta hai \u2014 ye list isi liye hai.
+     * "E.V" ko recognizer bahut tarah se likhta hai — ye list isi liye hai.
      */
     val WAKE = listOf(
         "ev", "e v", "e.v", "eevee", "evi", "eve", "heyev", "hey ev", "hi ev",
@@ -258,17 +264,26 @@ object HinglishWords {
     )
 
     /**
-     * Kisi bhi list me ye shabd hai ya nahi \u2014 poora shabd milega, aadha nahi.
+     * Kisi bhi list me ye shabd hai ya nahi — poora shabd milega, aadha nahi.
      *
      * "kam" dhoondhte waqt "kamra" match na ho jaye, isliye seedha `contains`
      * nahi kiya gaya.
+     *
+     * Punctuation bhi shabd ka kinara maana jata hai. Pehle sirf space par
+     * shabd tootte the, isliye "awaaz thodi dhime." ka aakhri shabd
+     * "dhime." reh jata tha aur list se match hi nahi hota tha — aur bolne
+     * wale ko lagta tha ki E.V ne baat samjhi hi nahi.
      */
     fun has(text: String, words: List<String>): Boolean {
-        val hay = " " + text.lowercase().trim() + " "
+        val clean = text.lowercase()
+            .replace(Regex("[?!.,;:\"']"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val hay = " " + clean + " "
         return words.any { hay.contains(" " + it + " ") }
     }
 
-    /** Bole gaye ginti ko number me badalna \u2014 "paanch" -> 5. */
+    /** Bole gaye ginti ko number me badalna — "paanch" -> 5. */
     fun number(word: String): Int? =
         word.trim().lowercase().let { it.toIntOrNull() ?: NUMBERS[it] }
 }

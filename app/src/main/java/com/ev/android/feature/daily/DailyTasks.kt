@@ -6,7 +6,7 @@ import android.provider.AlarmClock
 import com.ev.android.feature.launcher.AppLauncher
 
 /**
- * Rozmarra ke kaam \u2014 timer aur alarm.
+ * Rozmarra ke kaam — timer aur alarm.
  *
  * Android ke apne AlarmClock intents use karte hain, isliye ye phone ki default
  * Clock app me set hote hain, koi permission nahi lagti, aur EXTRA_SKIP_UI se
@@ -33,8 +33,20 @@ object DailyTasks {
         return AppLauncher.startIntent(context, intent)
     }
 
+    /**
+     * "1 ghanta", "2 ghante", "5 minute", "30 second".
+     *
+     * Ek ke liye "ghanta" aur zyada ke liye "ghante" — pehle dono jagah
+     * "ghante" bolta tha ("1 ghante ka timer"), jo bolne me galat lagta hai.
+     * Zero bhi alag se pakda gaya hai, warna 0 second bhi "0 ghante" ban
+     * jata tha.
+     */
     fun formatDuration(seconds: Int): String = when {
-        seconds % 3600 == 0 -> (seconds / 3600).toString() + " ghante"
+        seconds <= 0 -> "0 second"
+        seconds % 3600 == 0 -> {
+            val hours = seconds / 3600
+            hours.toString() + if (hours == 1) " ghanta" else " ghante"
+        }
         seconds >= 60 && seconds % 60 == 0 -> (seconds / 60).toString() + " minute"
         else -> seconds.toString() + " second"
     }
